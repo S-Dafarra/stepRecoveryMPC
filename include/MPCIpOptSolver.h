@@ -22,6 +22,7 @@
 #include <iDynTree/Core/VectorDynSize.h>
 #include <iDynTree/Core/VectorFixSize.h>
 #include <iDynTree/Core/MatrixDynSize.h>
+#include <iDynTree/Core/Transform.h>
 
 class MatrixBlock{
     iDynTree::VectorDynSize m_values;
@@ -55,18 +56,57 @@ class MPCIpOptSolver : public Ipopt::TNLP {
     double m_dT;
     unsigned int m_horizon;
     double m_g;
+    bool m_rightSwing;
+    unsigned int m_impact;
+    
+    iDynTree::VectorFixSize<9> m_gamma0;
+    iDynTree::VectorFixSize<6> m_fLPrev, m_fRPrev;
+    
+    iDynTree::MatrixDynSize m_wrenchA;
+    iDynTree::VectorFixSize<6> m_wrenchb;
+    
+    iDynTree::Transform m_wHl, m_whr;
+    
+    iDynTree::Position m_desiredCoM;
+    
+    iDynTree::VectorFixSize<9> m_gammaWeight, m_gammaWeightImpact;
+    iDynTree::VectorFixSize<12> m_wrenchWeight, m_derivativeWrenchWeight;
+
+    
+    bool computeModelMatrices();
+    bool updateModelConstraints();
+    
     
 public:
     MPCIpOptSolver();
+    
     ~MPCIpOptSolver();
     
     bool setTimeSettings(double dT, unsigned int horizon);
     
-    bool setImpactInstant(unsigned int impact);
+    void rightFootSwinging(bool rightFootIsSwinging);
     
-    bool setGamma0(iDynTree::VectorFixSize<9>& gamma0);
+    void setImpactInstant(unsigned int impact);
     
-    bool setPreviousWrench(iDynTree::VectorFixSize<6>& previousLeftWrench, iDynTree::VectorFixSize<6>& previousRightWrench);
+    void setGamma0(const iDynTree::VectorFixSize<9>& gamma0);
+    
+    void setPreviousWrench(const iDynTree::VectorFixSize<6>& previousLeftWrench, const iDynTree::VectorFixSize<6>& previousRightWrench);
+    
+    bool setWrenchConstraints(const iDynTree::MatrixDynSize& wrenchConstraintsMatrix, const iDynTree::VectorFixSize<6>& wrenchConstraintsBounds);
+    
+    void setLeftFootTransform(const iDynTree::Transform& w_H_l);
+    
+    void setRightFootTransform(const iDynTree::Transform& w_H_r);
+    
+    void setDesiredCOMPosition(const iDynTree::Position& desiredCOM);
+    
+    void setGammaWeight(const iDynTree::VectorFixSize<9>& gammaWeight);
+    
+    void setPostImpactGammaWeight(const iDynTree::VectorFixSize<9>& gammaImpactWeight);
+    
+    void setWrenchsWeight(const iDynTree::VectorFixSize<12>& wrenchWeight);
+    
+    void setWrenchDerivativeWeight(const iDynTree::VectorFixSize<12>& derivativeWrenchWeight);
     
     // IPOPT methods redefinition
     

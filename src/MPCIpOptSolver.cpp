@@ -118,3 +118,132 @@ bool MatrixBlock::setTolerance(double tol)
     m_tol = tol;
     return true;
 }
+
+std::vector<unsigned int> MatrixBlock::getColsIndeces(bool plusOffset)
+{
+    if(!plusOffset)
+        return m_nzColIndeces;
+    else return m_nzColIndecesOffset;
+}
+
+std::vector<unsigned int> MatrixBlock::getRowIndeces(bool plusOffset)
+{
+    if(!plusOffset)
+        return m_nzRowIndeces;
+    else return m_nzRowIndecesOffset;
+}
+
+iDynTree::VectorDynSize MatrixBlock::getValues()
+{
+    return m_values;
+}
+
+
+MPCIpOptSolver::MPCIpOptSolver()
+:m_g(9.81)
+,m_dT(0)
+,m_horizon(0)
+,m_rightSwing(true)
+,m_impact(0)
+{
+    m_gamma0.zero();
+    m_fLPrev.zero();
+    m_fRPrev.zero();
+    m_wrenchb.zero();
+    m_desiredCoM.zero();
+    m_gammaWeight.zero();
+    m_gammaWeightImpact.zero();
+    m_wrenchWeight.zero();
+    m_derivativeWrenchWeight.zero();
+}
+
+MPCIpOptSolver::~MPCIpOptSolver()
+{
+}
+
+bool MPCIpOptSolver::setTimeSettings(double dT, unsigned int horizon)
+{
+    if(dT <= 0){
+        std::cerr << "The time step is supposed to be positive" << std::endl;
+        return false;
+    }
+    
+    if(horizon == 0){
+        std::cerr << "The horizon is supposed to be non-null" << std::endl;
+        return false;
+    }
+    
+    m_dT = dT;
+    m_horizon = horizon;
+    
+    return true;
+}
+
+void MPCIpOptSolver::rightFootSwinging(bool rightFootIsSwinging)
+{
+    m_rightSwing = rightFootIsSwinging;
+}
+
+void MPCIpOptSolver::setImpactInstant(unsigned int impact)
+{
+    m_impact = impact;
+}
+
+void MPCIpOptSolver::setGamma0(const iDynTree::VectorFixSize<9>& gamma0)
+{
+    m_gamma0 = gamma0;
+}
+
+void MPCIpOptSolver::setPreviousWrench(const iDynTree::VectorFixSize<6>& previousLeftWrench, const iDynTree::VectorFixSize<6>& previousRightWrench)
+{
+    m_fLPrev = previousLeftWrench;
+    m_fRPrev = previousRightWrench;
+}
+
+bool MPCIpOptSolver::setWrenchConstraints(const iDynTree::MatrixDynSize& wrenchConstraintsMatrix, const iDynTree::VectorFixSize<6>& wrenchConstraintsBounds)
+{
+    if(wrenchConstraintsMatrix.rows() != 6){
+        std::cerr << "The wrenchConstraintsMatrix is expected to have 6 rows" << std::endl;
+        return false;
+    }
+    m_wrenchA = wrenchConstraintsMatrix;
+    m_wrenchb = wrenchConstraintsBounds;
+    
+    return true;
+}
+
+void MPCIpOptSolver::setLeftFootTransform(const iDynTree::Transform& w_H_l)
+{
+    m_wHl = w_H_l;
+}
+
+void MPCIpOptSolver::setRightFootTransform(const iDynTree::Transform& w_H_r)
+{
+    m_whr = w_H_r;
+}
+
+void MPCIpOptSolver::setDesiredCOMPosition(const iDynTree::Position& desiredCOM)
+{
+    m_desiredCoM = desiredCOM;
+}
+
+void MPCIpOptSolver::setGammaWeight(const iDynTree::VectorFixSize<9>& gammaWeight)
+{
+    m_gammaWeight = gammaWeight;
+}
+
+void MPCIpOptSolver::setPostImpactGammaWeight(const iDynTree::VectorFixSize<9>& gammaImpactWeight)
+{
+    m_gammaWeightImpact = gammaImpactWeight;
+}
+
+void MPCIpOptSolver::setWrenchsWeight(const iDynTree::VectorFixSize<12>& wrenchWeight)
+{
+    m_wrenchWeight = wrenchWeight;
+}
+
+void MPCIpOptSolver::setWrenchDerivativeWeight(const iDynTree::VectorFixSize<12>& derivativeWrenchWeight)
+{
+    m_derivativeWrenchWeight = derivativeWrenchWeight;
+}
+
