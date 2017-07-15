@@ -47,6 +47,7 @@ class MPCIpOptSolver : public Ipopt::TNLP {
     iDynTree::VectorFixSize<6> m_fLPrev, m_fRPrev;
     
     iDynTree::MatrixDynSize m_wrenchA, m_wrenchAl, m_wrenchAr;
+    iDynTree::SparseMatrix m_wrenchAlSparse, m_wrenchArSparse;
     iDynTree::VectorFixSize<6> m_wrenchb;
     
     iDynTree::Transform m_wHl, m_wHr;
@@ -63,17 +64,19 @@ class MPCIpOptSolver : public Ipopt::TNLP {
     iDynTree::VectorFixSize<9> m_bias;
     
     std::vector<MatrixBlock> m_modelConstraintsJacobian;
+    std::vector<MatrixBlock> m_wrenchConstraintJacobian;
     
     iDynTree::MatrixDynSize m_skewBuffer;
     iDynTree::SparseMatrix m_minusIdentity;
     iDynTree::MatrixDynSize m_wrenchTransform;
-
+    
+    iDynTree::VectorDynSize m_previousSolution;
     
     bool computeModelMatrices();
     bool computeModelBias();
     bool computeModelConstraintsJacobian();
     bool computeWrenchConstraints();
-    
+    bool computeWrenchConstraintsJacobian();
     
 public:
     MPCIpOptSolver();

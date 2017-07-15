@@ -268,11 +268,11 @@ bool MPCIpOptSolver::computeModelConstraintsJacobian()
     templateF.rowOffset = row;
     templateF.colOffset = col;
     m_modelConstraintsJacobian[1] = templateF;
-    row += 9;
-    col = 0;
+    row = 9;
     
     int index = 2;
     for(int t = 1; t < m_horizon; ++t){
+        col = 21*(t-1);
         
         templateEv.rowOffset = row;
         templateEv.colOffset = col;
@@ -292,7 +292,6 @@ bool MPCIpOptSolver::computeModelConstraintsJacobian()
         ++index;
         
         row += 9;
-        col = 21*(t-1);
     }
 
     return true;
@@ -317,6 +316,114 @@ bool MPCIpOptSolver::computeWrenchConstraints()
     
     Ar_map = A_map*wrenchTransform_map;
     
+    m_wrenchAlSparse.resize(m_wrenchAl.rows(), m_wrenchAl.cols());
+    m_wrenchArSparse.resize(m_wrenchAr.rows(), m_wrenchAr.cols());
+    
+    iDynTree::Triplets valuesL, valuesR;
+    valuesL.setSubMatrix(0,0,m_wrenchAl); //maybe we can ask for the sparsity of this matrix
+    m_wrenchAlSparse.setFromTriplets(valuesL);
+    
+    valuesR.setSubMatrix(0,0,m_wrenchAr);
+    m_wrenchArSparse.setFromTriplets(valuesR);
+    
     return true;
 }
+
+bool MPCIpOptSolver::computeWrenchConstraintsJacobian()
+{
+    MatrixBlock templateLeft, templateRight;
+    
+    templateLeft.blockPtr.reset(&m_wrenchAlSparse);
+    templateRight.blockPtr.reset(&m_wrenchArSparse);
+    
+    m_wrenchConstraintJacobian.resize(m_horizon*2);
+    
+    unsigned int row = 0;
+    unsigned int col = 9;
+    unsigned int index = 0;
+    
+    unsigned int nConstraintsL = m_wrenchAl.rows();
+    unsigned int nConstraintsR = m_wrenchAr.rows();
+    
+    for (int t=0; t<m_horizon; ++t){
+        col = 9 + 21*t; //you have to pick the right variables inside the decision variables vector
+        templateLeft.rowOffset = row;
+        templateLeft.colOffset = col;
+        m_wrenchConstraintJacobian[index] = templateLeft;
+        index++;
+        col += 6;
+        row += nConstraintsL;
+        
+        templateRight.rowOffset = row;
+        templateRight.colOffset = col;
+        m_wrenchConstraintJacobian[index] = templateRight;
+        index++; 
+        
+        row += nConstraintsR;
+    }
+    
+    return true;
+}
+
+bool MPCIpOptSolver::get_nlp_info(Ipopt::Index& n, Ipopt::Index& m, Ipopt::Index& nnz_jac_g, Ipopt::Index& nnz_h_lag, Ipopt::TNLP::IndexStyleEnum& index_style)
+{
+    n = 21*m_horizon;
+    m = (9+m_wrenchAl.rows()+m_wrenchAr.rows())*m_horizon;
+    nnz_jac_g = 0;
+    for(int i=0; i<m_modelConstraintsJacobian.size(); ++i){
+        nnz_jac_g += m_modelConstraintsJacobian[i].blockPtr->numberOfNonZeros();
+    }
+    for(int i=0; i<m_wrenchConstraintJacobian.size(); ++i){
+        nnz_jac_g += m_wrenchConstraintJacobian[i].blockPtr->numberOfNonZeros();
+    }
+    nnz_h_lag = n*n;//dense
+    
+    index_style = Ipopt::TNLP::C_STYLE;
+    
+    return true;
+}
+
+bool MPCIpOptSolver::get_bounds_info(Ipopt::Index n, Ipopt::Number* x_l, Ipopt::Number* x_u, Ipopt::Index m, Ipopt::Number* g_l, Ipopt::Number* g_u)
+{
+    for (Ipopt::Index i = 0; i < n; ++i) {
+        x_l[i] = -2e+19;
+        x_u[i] =  2e+19;
+    }
+    
+    for (Ipopt::Index c = 0; c < m; ++c) {
+        g_l[c] = -2e+19;
+        g_u[c] =  0;
+    }
+    
+    return true;
+}
+
+bool MPCIpOptSolver::get_starting_point(Ipopt::Index n, bool init_x, Ipopt::Number* x, bool init_z, Ipopt::Number* z_L, Ipopt::Number* z_U, Ipopt::Index m, bool init_lambda, Ipopt::Number* lambda)
+{
+    if(init_z) return false;
+    if(init_lambda) return false;
+    
+    if(init_x){
+        Eigen::Map<Eigen::VectorXd> x_map(x, n);
+        
+        if(m_previousSolution.size()!=n){
+            x_map.setZero();
+            return true;
+        }
+        
+        Eigen::Map<Eigen::VectorXd> prevSol_map(m_previousSolution.data(), n);
+        iDynTree::iDynTreeEigenMatrixMap ev_map = iDynTree::toEigen(m_EvGamma);
+        iDynTree::iDynTreeEigenMatrixMap f_map = iDynTree::toEigen(m_FGamma);
+        Eigen::Map<Eigen::VectorXd> bias_map(m_bias.data(), 9);
+        
+        x_map.head((m_horizon-1)*21) = prevSol_map.tail((m_horizon-1)*21);
+        x_map.segment<9>((m_horizon-1)*21) = ev_map*prevSol_map.segment<9>((m_horizon-1)*21) + f_map*prevSol_map.tail<12>() + bias_map;
+        x_map.tail<12>() = prevSol_map.tail<12>();
+        
+        return true;
+    }
+    return false;
+}
+
+
 
