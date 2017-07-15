@@ -23,33 +23,16 @@
 #include <iDynTree/Core/VectorFixSize.h>
 #include <iDynTree/Core/MatrixDynSize.h>
 #include <iDynTree/Core/Transform.h>
+#include <iDynTree/Core/SparseMatrix.h>
+#include <memory>
 
-class MatrixBlock{
-    iDynTree::VectorDynSize m_values;
-    std::vector<unsigned int> m_nzRowIndeces;
-    std::vector<unsigned int> m_nzColIndeces;
-    std::vector<unsigned int> m_nzRowIndecesOffset;
-    std::vector<unsigned int> m_nzColIndecesOffset;
-    double m_tol;
-    std::pair< unsigned int, unsigned int> m_offsets;
+typedef struct {
     
-    void addOffset();
+    std::shared_ptr<iDynTree::SparseMatrix> blockPtr;
+    unsigned int rowOffset;
+    unsigned int colOffset;
     
-public:
-    MatrixBlock();
-    ~MatrixBlock();
-    
-    bool setTolerance(double tol);
-    bool setBlock(const iDynTree::MatrixDynSize& block);
-    bool setBlock(const iDynTree::MatrixDynSize& block,
-                  const std::vector<unsigned int>& nonZerosRowIndeces,
-                  const std::vector<unsigned int>& nonZerosColumnIndeces);
-    void setOffsets(unsigned int rowOffset, unsigned int colOffset);
-    iDynTree::VectorDynSize getValues();
-    std::vector<unsigned int> getRowIndeces(bool plusOffset = true);
-    std::vector<unsigned int> getColsIndeces(bool plusOffset = true);
-    
-};
+} MatrixBlock;
 
 class MPCIpOptSolver : public Ipopt::TNLP {
     
@@ -58,23 +41,38 @@ class MPCIpOptSolver : public Ipopt::TNLP {
     double m_g;
     bool m_rightSwing;
     unsigned int m_impact;
+    double m_mass;
     
     iDynTree::VectorFixSize<9> m_gamma0;
     iDynTree::VectorFixSize<6> m_fLPrev, m_fRPrev;
     
-    iDynTree::MatrixDynSize m_wrenchA;
+    iDynTree::MatrixDynSize m_wrenchA, m_wrenchAl, m_wrenchAr;
     iDynTree::VectorFixSize<6> m_wrenchb;
     
-    iDynTree::Transform m_wHl, m_whr;
+    iDynTree::Transform m_wHl, m_wHr;
     
     iDynTree::Position m_desiredCoM;
     
     iDynTree::VectorFixSize<9> m_gammaWeight, m_gammaWeightImpact;
     iDynTree::VectorFixSize<12> m_wrenchWeight, m_derivativeWrenchWeight;
+    
+    iDynTree::MatrixDynSize m_EvGamma;
+    iDynTree::SparseMatrix m_EvGammaSparse;
+    iDynTree::MatrixDynSize m_FGamma;
+    iDynTree::SparseMatrix m_FGammaSparse;
+    iDynTree::VectorFixSize<9> m_bias;
+    
+    std::vector<MatrixBlock> m_modelConstraintsJacobian;
+    
+    iDynTree::MatrixDynSize m_skewBuffer;
+    iDynTree::SparseMatrix m_minusIdentity;
+    iDynTree::MatrixDynSize m_wrenchTransform;
 
     
     bool computeModelMatrices();
-    bool updateModelConstraints();
+    bool computeModelBias();
+    bool computeModelConstraintsJacobian();
+    bool computeWrenchConstraints();
     
     
 public:
@@ -83,6 +81,8 @@ public:
     ~MPCIpOptSolver();
     
     bool setTimeSettings(double dT, unsigned int horizon);
+    
+    bool setRobotMass(const double mass);
     
     void rightFootSwinging(bool rightFootIsSwinging);
     
