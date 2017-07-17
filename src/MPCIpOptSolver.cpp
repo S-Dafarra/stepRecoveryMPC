@@ -26,7 +26,7 @@ MPCIpOptSolver::MPCIpOptSolver()
     m_fLPrev.zero();
     m_fRPrev.zero();
     m_wrenchb.zero();
-    m_desiredCoM.zero();
+    m_desiredGamma.zero();
     m_gammaWeight.zero();
     m_gammaWeightImpact.zero();
     m_wrenchWeight.zero();
@@ -135,7 +135,8 @@ void MPCIpOptSolver::setRightFootTransform(const iDynTree::Transform& w_H_r)
 
 void MPCIpOptSolver::setDesiredCOMPosition(const iDynTree::Position& desiredCOM)
 {
-    m_desiredCoM = desiredCOM;
+    Eigen::Map<const Eigen::VectorXd> desiredCOM_map(desiredCOM.data(), 3);
+    iDynTree::toEigen(m_desiredGamma).head<3>() = desiredCOM_map;
 }
 
 void MPCIpOptSolver::setGammaWeight(const iDynTree::VectorFixSize<9>& gammaWeight)
@@ -425,5 +426,110 @@ bool MPCIpOptSolver::get_starting_point(Ipopt::Index n, bool init_x, Ipopt::Numb
     return false;
 }
 
+bool MPCIpOptSolver::eval_f(Ipopt::Index n, const Ipopt::Number* x, bool new_x, Ipopt::Number& obj_value)
+{
+    Eigen::Map<const Eigen::VectorXd> x_map(x, n);
+    Eigen::Map<const Eigen::VectorXd > gammaWeight_map(m_gammaWeight.data(),9);
+    Eigen::Map<const Eigen::VectorXd > gammaImpactWeight_map(m_gammaWeightImpact.data(),9);
+    Eigen::Map<const Eigen::VectorXd > wrenchWeight_map(m_wrenchWeight.data(),12);
+    Eigen::Map<const Eigen::VectorXd > derivativeWrenchWeight_map(m_derivativeWrenchWeight.data(),12);
+    
+    double gammaCost = 0;
+    double wrenchCost = 0;
+    double impactCost = 0;
+    double wrenchDiffCost = 0;
+    Eigen::Map <Eigen::VectorXd> fl_map(m_fLPrev.data(), 6);
+    Eigen::Map <Eigen::VectorXd> fr_map(m_fRPrev.data(), 6);
+        
+    for(int t=0; t < m_horizon; ++t){
+        gammaCost += 0.5*(x_map.segment<9>(21*t) - iDynTree::toEigen(m_desiredGamma)).transpose() * gammaWeight_map.asDiagonal() * (x_map.segment<9>(21*t) - iDynTree::toEigen(m_desiredGamma));
+        
+        if((t >= m_impact)&&(t < (m_horizon-1))){
+            impactCost += 0.5*(x_map.segment<9>(21*t) - iDynTree::toEigen(m_desiredGamma)).transpose() * gammaImpactWeight_map.asDiagonal() * (x_map.segment<9>(21*t) - iDynTree::toEigen(m_desiredGamma));
+        }
+        
+        wrenchCost += 0.5*x_map.segment<12>(9 + 21*t).transpose() * wrenchWeight_map.asDiagonal() * x_map.segment<12>(9 + 21*t);
+        
+        if(t == 0){
+            wrenchDiffCost += 0.5*(x_map.segment<6>(9) - fl_map).transpose() * derivativeWrenchWeight_map.head<6>().asDiagonal() * (x_map.segment<6>(9) - fl_map);
+            wrenchDiffCost += 0.5*(x_map.segment<6>(9+6) - fr_map).transpose() * derivativeWrenchWeight_map.tail<6>().asDiagonal() * (x_map.segment<6>(9+6) - fr_map);
+        }
+        else{
+            wrenchDiffCost += 0.5*(x_map.segment<12>(9+21*t) - x_map.segment<12>(9+21*(t-1))).transpose() * derivativeWrenchWeight_map.asDiagonal() * (x_map.segment<12>(9+21*t) - x_map.segment<12>(9+21*(t-1)));
+        }
+    }
 
+    double terminalCost = 0.5*(x_map.segment<9>(21*(m_horizon-1)) - iDynTree::toEigen(m_desiredGamma)).transpose() * gammaImpactWeight_map.asDiagonal() * (x_map.segment<9>(21*(m_horizon-1)) - iDynTree::toEigen(m_desiredGamma));
+
+    obj_value = gammaCost + impactCost + wrenchCost + wrenchDiffCost + terminalCost;
+    return true;
+}
+
+bool MPCIpOptSolver::eval_grad_f(Ipopt::Index n, const Ipopt::Number* x, bool new_x, Ipopt::Number* grad_f)
+{
+    Eigen::Map<const Eigen::VectorXd> x_map(x, n);
+    Eigen::Map<Eigen::VectorXd> grad_map(grad_f, n);
+    Eigen::Map<const Eigen::VectorXd > gammaWeight_map(m_gammaWeight.data(),9);
+    Eigen::Map<const Eigen::VectorXd > gammaImpactWeight_map(m_gammaWeightImpact.data(),9);
+    Eigen::Map<const Eigen::VectorXd > wrenchWeight_map(m_wrenchWeight.data(),12);
+    Eigen::Map<const Eigen::VectorXd > derivativeWrenchWeight_map(m_derivativeWrenchWeight.data(),12);
+    Eigen::Map <Eigen::VectorXd> fl_map(m_fLPrev.data(), 6);
+    Eigen::Map <Eigen::VectorXd> fr_map(m_fRPrev.data(), 6);
+    
+    for(int t=0; t<m_horizon; ++t){
+        //Gamma
+        grad_map.segment<9>(21*t) = gammaWeight_map.asDiagonal() * (x_map.segment<9>(21*t) - iDynTree::toEigen(m_desiredGamma));
+        //Gamma Impact
+        if((t >= m_impact)&&(t < (m_horizon-1))){
+            grad_map.segment<9>(21*t) += gammaImpactWeight_map.asDiagonal() * (x_map.segment<9>(21*t) - iDynTree::toEigen(m_desiredGamma));
+        }
+        //Wrench
+        grad_map.segment<12>(9 + 21*t) = wrenchWeight_map.asDiagonal() * x_map.segment<12>(9 + 21*t);
+        //Derivative Wrench
+        if(t == 0){
+            grad_map.segment<6>(9) += derivativeWrenchWeight_map.head<6>().asDiagonal() * (x_map.segment<6>(9) - fl_map);
+            grad_map.segment<6>(9+6) += derivativeWrenchWeight_map.tail<6>().asDiagonal() * (x_map.segment<6>(9+6) - fr_map);
+        }
+        else{
+            grad_map.segment<12>(9 + 21*t) += derivativeWrenchWeight_map.asDiagonal() * (x_map.segment<12>(9+21*t) - x_map.segment<12>(9+21*(t-1)));
+            grad_map.segment<12>(9 + 21*(t-1)) += -1*derivativeWrenchWeight_map.asDiagonal() * (x_map.segment<12>(9+21*t) - x_map.segment<12>(9+21*(t-1)));
+        }
+    }
+    //terminal
+    grad_map.segment<9>(21*(m_horizon-1)) += gammaImpactWeight_map.asDiagonal() * (x_map.segment<9>(21*(m_horizon-1)) - iDynTree::toEigen(m_desiredGamma));
+    
+    return true;
+}
+
+bool MPCIpOptSolver::eval_g(Ipopt::Index n, const Ipopt::Number* x, bool new_x, Ipopt::Index m, Ipopt::Number* g)
+{
+    Eigen::Map<const Eigen::VectorXd> x_map(x, n);
+    Eigen::Map<Eigen::VectorXd> g_map(g, m);
+    iDynTree::iDynTreeEigenMatrixMap map_EvGamma = iDynTree::toEigen(m_EvGamma);
+    iDynTree::iDynTreeEigenMatrixMap map_FGamma = iDynTree::toEigen(m_FGamma);
+    Eigen::Map <Eigen::VectorXd> gamma0_map(m_gamma0.data(), 9);
+    Eigen::Map <Eigen::VectorXd> bias_map (m_bias.data(), 9);
+    iDynTree::iDynTreeEigenMatrixMap Al_map = iDynTree::toEigen(m_wrenchAl);
+    iDynTree::iDynTreeEigenMatrixMap Ar_map = iDynTree::toEigen(m_wrenchAr);
+    Eigen::Map <Eigen::VectorXd> b_map(m_wrenchb.data(),6);
+    
+    unsigned int nConstraintsL = m_wrenchAl.rows();
+    unsigned int nConstraintsR = m_wrenchAr.rows();
+    unsigned int constraintOffset = 0;
+    
+    for(int t=0; t<m_horizon; ++t){
+        if(t==0){
+            g_map.head<9>() = -x_map.head<9>() + map_EvGamma*gamma0_map + map_FGamma*x_map.segment<12>(9) + bias_map;
+        }
+        else{
+            g_map.segment<9>(9*t) = -x_map.segment<9>(21*t) + map_EvGamma*x_map.segment<9>(21*(t-1)) + map_FGamma*x_map.segment<12>(9 + 21*t) + bias_map;
+        }
+        
+        constraintOffset = 21*m_horizon + (nConstraintsL+ nConstraintsR)*t;
+        g_map.segment(constraintOffset, nConstraintsL) = Al_map*x_map.segment<6>(9 + 21*t) - b_map;
+        constraintOffset += 6;
+        g_map.segment(constraintOffset, nConstraintsR) = Al_map*x_map.segment<6>(9 + 21*t + 6) - b_map;
+    }
+    return true;
+}
 

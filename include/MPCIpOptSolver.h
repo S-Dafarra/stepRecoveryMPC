@@ -52,7 +52,7 @@ class MPCIpOptSolver : public Ipopt::TNLP {
     
     iDynTree::Transform m_wHl, m_wHr;
     
-    iDynTree::Position m_desiredCoM;
+    iDynTree::VectorFixSize<9> m_desiredGamma;
     
     iDynTree::VectorFixSize<9> m_gammaWeight, m_gammaWeightImpact;
     iDynTree::VectorFixSize<12> m_wrenchWeight, m_derivativeWrenchWeight;
