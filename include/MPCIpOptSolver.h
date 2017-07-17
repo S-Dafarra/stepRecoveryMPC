@@ -39,7 +39,6 @@ class MPCIpOptSolver : public Ipopt::TNLP {
     double m_dT;
     unsigned int m_horizon;
     double m_g;
-    bool m_rightSwing;
     unsigned int m_impact;
     double m_mass;
     
@@ -69,14 +68,18 @@ class MPCIpOptSolver : public Ipopt::TNLP {
     iDynTree::MatrixDynSize m_skewBuffer;
     iDynTree::SparseMatrix m_minusIdentity;
     iDynTree::MatrixDynSize m_wrenchTransform;
+    iDynTree::SparseMatrix m_costHessian, m_gammaWeightHessian, m_gammaWeightImpactHessian, m_wrenchWeightHessian, m_derivativeWrenchWeightHessian, m_negativeDerWrenchHessian;
     
     iDynTree::VectorDynSize m_previousSolution;
+    int m_exitCode;
     
     bool computeModelMatrices();
     bool computeModelBias();
     bool computeModelConstraintsJacobian();
     bool computeWrenchConstraints();
     bool computeWrenchConstraintsJacobian();
+    bool computeSingleCostHessian();
+    bool computeCostHessian();
     
 public:
     MPCIpOptSolver();

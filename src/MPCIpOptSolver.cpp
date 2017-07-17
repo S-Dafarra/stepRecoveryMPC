@@ -19,8 +19,8 @@ MPCIpOptSolver::MPCIpOptSolver()
 ,m_mass(0.0)
 ,m_dT(0)
 ,m_horizon(0)
-,m_rightSwing(true)
 ,m_impact(0)
+,m_exitCode(-6)
 {
     m_gamma0.zero();
     m_fLPrev.zero();
@@ -69,6 +69,7 @@ bool MPCIpOptSolver::setTimeSettings(double dT, unsigned int horizon)
     m_dT = dT;
     m_horizon = horizon;
     m_modelConstraintsJacobian.resize(3*m_horizon);
+    m_costHessian.resize(21*m_horizon, 21*m_horizon);
     
     return true;
 }
@@ -81,12 +82,6 @@ bool MPCIpOptSolver::setRobotMass(const double mass)
     }
     m_mass = mass;
     return true;
-}
-
-
-void MPCIpOptSolver::rightFootSwinging(bool rightFootIsSwinging)
-{
-    m_rightSwing = rightFootIsSwinging;
 }
 
 void MPCIpOptSolver::setImpactInstant(unsigned int impact)
@@ -366,6 +361,65 @@ bool MPCIpOptSolver::computeWrenchConstraintsJacobian()
     return true;
 }
 
+bool MPCIpOptSolver::computeSingleCostHessian()
+{
+    m_gammaWeightHessian.resize(9,9);
+    m_gammaWeightImpactHessian.resize(9,9);
+    m_wrenchWeightHessian.resize(12,12);
+    m_derivativeWrenchWeightHessian.resize(12,12);
+    m_negativeDerWrenchHessian.resize(12,12);
+    
+    iDynTree::Triplets valuesGamma, valuesGammaImpact;
+    for(int i=0; i < m_gammaWeight.size(); ++i){
+        valuesGamma.addDiagonalMatrix(i, i, m_gammaWeight(i), 1);
+        valuesGammaImpact.addDiagonalMatrix(i, i, m_gammaWeightImpact(i), 1);
+    }
+    m_gammaWeightHessian.setFromTriplets(valuesGamma);
+    m_gammaWeightImpactHessian.setFromTriplets(valuesGammaImpact);
+    
+    iDynTree::Triplets valuesWrench, valuesWrenchDerivative, valuesNegDerivative;
+    for(int i=0; i < m_wrenchWeight.size(); ++i){
+        valuesWrench.addDiagonalMatrix(i, i, m_wrenchWeight(i),1);
+        valuesWrenchDerivative.addDiagonalMatrix(i, i, m_derivativeWrenchWeight(i), 1);
+        valuesNegDerivative.addDiagonalMatrix(i, i, -m_derivativeWrenchWeight(i), 1);
+    }
+    m_wrenchWeightHessian.setFromTriplets(valuesWrench);
+    m_derivativeWrenchWeightHessian.setFromTriplets(valuesWrenchDerivative);
+    m_negativeDerWrenchHessian.setFromTriplets(valuesNegDerivative);
+    
+    return true;
+}
+
+bool MPCIpOptSolver::computeCostHessian()
+{
+    if(!computeSingleCostHessian())
+        return false;
+    
+    iDynTree::Triplets values;
+    
+    for(int t=0; t<m_horizon; ++t){
+        values.addSubMatrix(21*t, 21*t, m_gammaWeightHessian);
+        if((t >= m_impact)&&(t < (m_horizon-1))){
+            values.addSubMatrix(21*t, 21*t, m_gammaWeightImpactHessian);
+        }
+        values.addSubMatrix(9 + 21*t, 9 + 21*t, m_wrenchWeightHessian);
+        if(t == 0){
+            values.addSubMatrix(9, 9, m_derivativeWrenchWeightHessian);
+        }
+        else {
+            values.addSubMatrix(9 + 21*t, 9+21*t, m_derivativeWrenchWeightHessian);
+            values.addSubMatrix(9 + 21*t, 9+21*(t-1), m_negativeDerWrenchHessian);
+            values.addSubMatrix(9 + 21*(t-1), 9 + 21*(t-1), m_derivativeWrenchWeightHessian);
+            values.addSubMatrix(9 + 21*(t-1), 9 + 21*t, m_negativeDerWrenchHessian);
+        }
+    }
+    
+    m_costHessian.setFromTriplets(values);
+    
+    return true;
+}
+
+
 bool MPCIpOptSolver::get_nlp_info(Ipopt::Index& n, Ipopt::Index& m, Ipopt::Index& nnz_jac_g, Ipopt::Index& nnz_h_lag, Ipopt::TNLP::IndexStyleEnum& index_style)
 {
     n = 21*m_horizon;
@@ -377,7 +431,7 @@ bool MPCIpOptSolver::get_nlp_info(Ipopt::Index& n, Ipopt::Index& m, Ipopt::Index
     for(int i=0; i<m_wrenchConstraintJacobian.size(); ++i){
         nnz_jac_g += m_wrenchConstraintJacobian[i].blockPtr->numberOfNonZeros();
     }
-    nnz_h_lag = n*n;//dense
+    nnz_h_lag = m_costHessian.numberOfNonZeros();
     
     index_style = Ipopt::TNLP::C_STYLE;
     
@@ -531,5 +585,114 @@ bool MPCIpOptSolver::eval_g(Ipopt::Index n, const Ipopt::Number* x, bool new_x, 
         g_map.segment(constraintOffset, nConstraintsR) = Al_map*x_map.segment<6>(9 + 21*t + 6) - b_map;
     }
     return true;
+}
+
+bool MPCIpOptSolver::eval_jac_g(Ipopt::Index n, const Ipopt::Number* x, bool new_x, Ipopt::Index m, Ipopt::Index nele_jac, Ipopt::Index* iRow, Ipopt::Index* jCol, Ipopt::Number* values)
+{
+    if(values == NULL){
+        int index = 0;
+        for(int block = 0; block < m_modelConstraintsJacobian.size(); ++block){
+            for(iDynTree::SparseMatrix::Iterator val = m_modelConstraintsJacobian[block].blockPtr->begin(); val != m_modelConstraintsJacobian[block].blockPtr->end(); ++val){
+                iRow[index] = val->row() + m_modelConstraintsJacobian[block].rowOffset;
+                jCol[index] = val->column() + m_modelConstraintsJacobian[block].colOffset;
+                index++;
+            }
+        }
+        int rowOffset = m_horizon*9;
+        for(int block=0; block < m_wrenchConstraintJacobian.size(); ++block){
+            for(iDynTree::SparseMatrix::Iterator val = m_wrenchConstraintJacobian[block].blockPtr->begin(); val != m_wrenchConstraintJacobian[block].blockPtr->end(); ++val){
+                iRow[index] = val->row() + m_wrenchConstraintJacobian[block].rowOffset + rowOffset;
+                jCol[index] = val->column() + m_wrenchConstraintJacobian[block].colOffset;
+                index++;
+            }
+        }
+    }
+    else{
+        int index = 0;
+        for(int block = 0; block < m_modelConstraintsJacobian.size(); ++block){
+            for(iDynTree::SparseMatrix::Iterator val = m_modelConstraintsJacobian[block].blockPtr->begin(); val != m_modelConstraintsJacobian[block].blockPtr->end(); ++val){
+                values[index] = val->value();
+                index++;
+            }
+        }
+        for(int block=0; block < m_wrenchConstraintJacobian.size(); ++block){
+            for(iDynTree::SparseMatrix::Iterator val = m_wrenchConstraintJacobian[block].blockPtr->begin(); val != m_wrenchConstraintJacobian[block].blockPtr->end(); ++val){
+                values[index] = val->value();
+                index++;
+            }
+        }
+    }
+    
+    return true;
+}
+
+
+bool MPCIpOptSolver::eval_h(Ipopt::Index n, const Ipopt::Number* x, bool new_x, Ipopt::Number obj_factor, Ipopt::Index m, const Ipopt::Number* lambda, bool new_lambda, Ipopt::Index nele_hess, Ipopt::Index* iRow, Ipopt::Index* jCol, Ipopt::Number* values)
+{
+    if(values == NULL){
+        int index = 0;
+        for(iDynTree::SparseMatrix::Iterator val = m_costHessian.begin(); val != m_costHessian.end(); ++val){
+            iRow[index] = val->row();
+            jCol[index] = val->column();
+            index++;
+        }
+    }
+    else{
+        int index = 0;
+        for(iDynTree::SparseMatrix::Iterator val = m_costHessian.begin(); val != m_costHessian.end(); ++val){
+            values[index] = obj_factor*val->value();
+            index++;
+        }
+    }
+    return true;
+}
+
+void MPCIpOptSolver::finalize_solution(Ipopt::SolverReturn status, Ipopt::Index n, const Ipopt::Number* x, const Ipopt::Number* z_L, const Ipopt::Number* z_U, Ipopt::Index m, const Ipopt::Number* g, const Ipopt::Number* lambda, Ipopt::Number obj_value, const Ipopt::IpoptData* ip_data, Ipopt::IpoptCalculatedQuantities* ip_cq)
+{
+    if((status == Ipopt::SUCCESS)||status == Ipopt::STOP_AT_ACCEPTABLE_POINT){
+        Eigen::Map< const Eigen::VectorXd > x_map (x, n);
+
+        m_previousSolution.resize(n);
+        iDynTree::toEigen(m_previousSolution) = x_map;
+        
+        
+        if(status == Ipopt::SUCCESS){
+            m_exitCode = 0;
+        }
+        else m_exitCode = 1;
+    }
+    else {
+        switch(status){
+            
+            case Ipopt::LOCAL_INFEASIBILITY:
+                m_exitCode = -1;
+                break;
+                
+            case Ipopt::MAXITER_EXCEEDED:
+            case Ipopt::CPUTIME_EXCEEDED:
+            case Ipopt::STOP_AT_TINY_STEP: //PREMATURE STOP
+                m_exitCode = -2;
+                break;
+                
+            case Ipopt::INVALID_NUMBER_DETECTED: //WRONG DATA INSERTION
+                m_exitCode = -3;
+                break;
+                
+            case Ipopt::DIVERGING_ITERATES:
+            case Ipopt::INTERNAL_ERROR:
+            case Ipopt::ERROR_IN_STEP_COMPUTATION:
+            case Ipopt::RESTORATION_FAILURE: //IPOPT INTERNAL PROBLEM
+                m_exitCode = -4;
+                break;
+                
+            case Ipopt::USER_REQUESTED_STOP: //USER REQUESTED STOP
+                m_exitCode = -5;
+                break;
+                
+            default:
+                m_exitCode = -6;
+                
+        }
+    }
 }
 
