@@ -27,9 +27,13 @@ MPCIpOptSolver::MPCIpOptSolver()
     m_fRPrev.zero();
     m_wrenchb.zero();
     m_desiredGamma.zero();
+    m_gammaWeight.resize(9);
     m_gammaWeight.zero();
+    m_gammaWeightImpact.resize(9);
     m_gammaWeightImpact.zero();
+    m_wrenchWeight.resize(12);
     m_wrenchWeight.zero();
+    m_derivativeWrenchWeight.resize(12);
     m_derivativeWrenchWeight.zero();
     m_EvGamma.resize(9,9);
     m_EvGamma.zero();
@@ -100,19 +104,20 @@ void MPCIpOptSolver::setPreviousWrench(const iDynTree::VectorFixSize<6>& previou
     m_fRPrev = previousRightWrench;
 }
 
-bool MPCIpOptSolver::setWrenchConstraints(const iDynTree::MatrixDynSize& wrenchConstraintsMatrix, const iDynTree::VectorFixSize<6>& wrenchConstraintsBounds)
+bool MPCIpOptSolver::setWrenchConstraintsMatrix(const iDynTree::MatrixDynSize& wrenchConstraintsMatrix)
 {
-    if(wrenchConstraintsMatrix.rows() != 6){
-        std::cerr << "The wrenchConstraintsMatrix is expected to have 6 rows" << std::endl;
-        return false;
-    }
-    
-    if(wrenchConstraintsMatrix.rows() != wrenchConstraintsBounds.size()){
-        std::cerr << "Unbalanced dimensions between the matrix and the vector of constraints." << std::endl;
+    if(wrenchConstraintsMatrix.cols() != 6){
+        std::cerr << "The wrenchConstraintsMatrix is expected to have 6 columns" << std::endl;
         return false;
     }
     
     m_wrenchA = wrenchConstraintsMatrix;
+    
+    return true;
+}
+
+bool MPCIpOptSolver::setWrenchConstraintsVector(const iDynTree::VectorDynSize& wrenchConstraintsBounds)
+{
     m_wrenchb = wrenchConstraintsBounds;
     
     return true;
@@ -134,24 +139,45 @@ void MPCIpOptSolver::setDesiredCOMPosition(const iDynTree::Position& desiredCOM)
     iDynTree::toEigen(m_desiredGamma).head<3>() = desiredCOM_map;
 }
 
-void MPCIpOptSolver::setGammaWeight(const iDynTree::VectorFixSize<9>& gammaWeight)
+bool MPCIpOptSolver::setGammaWeight(const iDynTree::VectorDynSize& gammaWeight)
 {
+    if(gammaWeight.size() != 9){
+        std::cerr << "The gammaWeight vector is expected to be 9 dimensional" << std::endl;
+        return false;
+    }
     m_gammaWeight = gammaWeight;
+    return true;
 }
 
-void MPCIpOptSolver::setPostImpactGammaWeight(const iDynTree::VectorFixSize<9>& gammaImpactWeight)
+bool MPCIpOptSolver::setPostImpactGammaWeight(const iDynTree::VectorDynSize& gammaImpactWeight)
 {
+    if(gammaImpactWeight.size() != 9){
+        std::cerr << "The gammaWeight vector is expected to be 9 dimensional" << std::endl;
+        return false;
+    }
+    
     m_gammaWeightImpact = gammaImpactWeight;
+    return true;
 }
 
-void MPCIpOptSolver::setWrenchsWeight(const iDynTree::VectorFixSize<12>& wrenchWeight)
+bool MPCIpOptSolver::setWrenchsWeight(const iDynTree::VectorDynSize& wrenchWeight)
 {
+    if(wrenchWeight.size() != 12){
+        std::cerr << "The wrenchWeight vector is expected to be 9 dimensional" << std::endl;
+        return false;
+    }
     m_wrenchWeight = wrenchWeight;
+    return true;
 }
 
-void MPCIpOptSolver::setWrenchDerivativeWeight(const iDynTree::VectorFixSize<12>& derivativeWrenchWeight)
+bool MPCIpOptSolver::setWrenchDerivativeWeight(const iDynTree::VectorDynSize& derivativeWrenchWeight)
 {
+    if(derivativeWrenchWeight.size() != 12){
+        std::cerr << "The derivativeWrenchWeight vector is expected to be 9 dimensional" << std::endl;
+        return false;
+    }
     m_derivativeWrenchWeight = derivativeWrenchWeight;
+    return true;
 }
 
 bool MPCIpOptSolver::computeModelMatrices()
@@ -483,10 +509,10 @@ bool MPCIpOptSolver::get_starting_point(Ipopt::Index n, bool init_x, Ipopt::Numb
 bool MPCIpOptSolver::eval_f(Ipopt::Index n, const Ipopt::Number* x, bool new_x, Ipopt::Number& obj_value)
 {
     Eigen::Map<const Eigen::VectorXd> x_map(x, n);
-    Eigen::Map<const Eigen::VectorXd > gammaWeight_map(m_gammaWeight.data(),9);
-    Eigen::Map<const Eigen::VectorXd > gammaImpactWeight_map(m_gammaWeightImpact.data(),9);
-    Eigen::Map<const Eigen::VectorXd > wrenchWeight_map(m_wrenchWeight.data(),12);
-    Eigen::Map<const Eigen::VectorXd > derivativeWrenchWeight_map(m_derivativeWrenchWeight.data(),12);
+    Eigen::Map<const Eigen::VectorXd > gammaWeight_map(m_gammaWeight.data(),m_gammaWeight.size());
+    Eigen::Map<const Eigen::VectorXd > gammaImpactWeight_map(m_gammaWeightImpact.data(),m_gammaWeightImpact.size());
+    Eigen::Map<const Eigen::VectorXd > wrenchWeight_map(m_wrenchWeight.data(),m_wrenchWeight.size());
+    Eigen::Map<const Eigen::VectorXd > derivativeWrenchWeight_map(m_derivativeWrenchWeight.data(),m_derivativeWrenchWeight.size());
     
     double gammaCost = 0;
     double wrenchCost = 0;
@@ -523,10 +549,10 @@ bool MPCIpOptSolver::eval_grad_f(Ipopt::Index n, const Ipopt::Number* x, bool ne
 {
     Eigen::Map<const Eigen::VectorXd> x_map(x, n);
     Eigen::Map<Eigen::VectorXd> grad_map(grad_f, n);
-    Eigen::Map<const Eigen::VectorXd > gammaWeight_map(m_gammaWeight.data(),9);
-    Eigen::Map<const Eigen::VectorXd > gammaImpactWeight_map(m_gammaWeightImpact.data(),9);
-    Eigen::Map<const Eigen::VectorXd > wrenchWeight_map(m_wrenchWeight.data(),12);
-    Eigen::Map<const Eigen::VectorXd > derivativeWrenchWeight_map(m_derivativeWrenchWeight.data(),12);
+    Eigen::Map<const Eigen::VectorXd > gammaWeight_map(m_gammaWeight.data(),m_gammaWeight.size());
+    Eigen::Map<const Eigen::VectorXd > gammaImpactWeight_map(m_gammaWeightImpact.data(),m_gammaWeightImpact.size());
+    Eigen::Map<const Eigen::VectorXd > wrenchWeight_map(m_wrenchWeight.data(),m_wrenchWeight.size());
+    Eigen::Map<const Eigen::VectorXd > derivativeWrenchWeight_map(m_derivativeWrenchWeight.data(),m_derivativeWrenchWeight.size());
     Eigen::Map <Eigen::VectorXd> fl_map(m_fLPrev.data(), 6);
     Eigen::Map <Eigen::VectorXd> fr_map(m_fRPrev.data(), 6);
     

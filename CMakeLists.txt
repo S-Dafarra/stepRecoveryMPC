@@ -14,14 +14,30 @@ include(YCMDefaultDirs)
 
 find_package(iDynTree REQUIRED)
 find_package(IPOPT REQUIRED)
+find_package(YARP REQUIRED)
 
 find_package(Eigen3 REQUIRED)
 
 include_directories(SYSTEM ${IPOPT_INCLUDE_DIRS} ${EIGEN3_INCLUDE_DIR})
+include_directories(${YARP_INCLUDE_DIRS})
 
-set(SRMPC_SOURCES src/MPCIpOptSolver.cpp)
-set(SRMPC_HEADERS include/MPCIpOptSolver.h)
+set(MPCIPOPT_SOURCES src/MPCIpOptSolver.cpp)
+set(MPCIPOPT_HEADERS include/MPCIpOptSolver.h)
 
-add_library(${PROJECT_NAME}  SHARED ${SRMPC_HEADERS} ${SRMPC_SOURCES})
+add_library(MPCIpOpt  SHARED ${MPCIPOPT_HEADERS} ${MPCIPOPT_SOURCES})
+target_include_directories(MPCIpOpt PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(MPCIpOpt ${iDynTree_LIBRARIES} ${IPOPT_LIBRARIES})
+
+set(STEPRECOVERY_SOURCES src/StepRecoveryMPC.cpp)
+set(STEPRECOVERY_HEADERS include/StepRecoveryMPC.h)
+add_library(srMPC  SHARED ${STEPRECOVERY_HEADERS} ${STEPRECOVERY_SOURCES})
+target_include_directories(srMPC PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(srMPC ${iDynTree_LIBRARIES} ${IPOPT_LIBRARIES})
+
+
+set(COORDINATOR_SOURCES src/StepRecoveryCoordinator.cpp)
+set(COORDINATOR_HEADERS include/StepRecoveryCoordinator.h)
+
+add_executable(${PROJECT_NAME} ${COORDINATOR_SOURCES} ${COORDINATOR_HEADERS})
 target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_link_libraries(${PROJECT_NAME} ${iDynTree_LIBRARIES} ${IPOPT_LIBRARIES})
+target_link_libraries(${PROJECT_NAME} ${iDynTree_LIBRARIES} ${YARP_LIBRARIES})
