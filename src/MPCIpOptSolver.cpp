@@ -16,16 +16,18 @@
 
 MPCIpOptSolver::MPCIpOptSolver()
 :m_g(9.81)
-,m_mass(0.0)
+,m_mass(30.0)
 ,m_dT(0)
 ,m_horizon(0)
 ,m_impact(0)
 ,m_exitCode(-6)
+,m_rightFootStep(true)
 {
     m_gamma0.zero();
+    m_fLPrev.resize(6);
     m_fLPrev.zero();
+    m_fRPrev.resize(6);
     m_fRPrev.zero();
-    m_wrenchb.zero();
     m_desiredGamma.zero();
     m_gammaWeight.resize(9);
     m_gammaWeight.zero();
@@ -88,55 +90,82 @@ bool MPCIpOptSolver::setRobotMass(const double mass)
     return true;
 }
 
-void MPCIpOptSolver::setImpactInstant(unsigned int impact)
+bool MPCIpOptSolver::setImpactInstant(unsigned int impact, bool rightFootStepping)
 {
     m_impact = impact;
+    m_rightFootStep = rightFootStepping;
+    return true;
 }
 
-void MPCIpOptSolver::setGamma0(const iDynTree::VectorFixSize<9>& gamma0)
+bool MPCIpOptSolver::setGamma0(const iDynTree::VectorFixSize<9>& gamma0)
 {
     m_gamma0 = gamma0;
+    return true;
 }
 
-void MPCIpOptSolver::setPreviousWrench(const iDynTree::VectorFixSize<6>& previousLeftWrench, const iDynTree::VectorFixSize<6>& previousRightWrench)
+bool MPCIpOptSolver::setPreviousWrench(const iDynTree::VectorDynSize& previousLeftWrench, const iDynTree::VectorDynSize& previousRightWrench)
 {
+    if(previousLeftWrench.size() != 6){
+        std::cerr << "The previous left wrench is expected to be 6 dimensional" << std::endl;
+        return false;
+    }
+    if(previousRightWrench.size() != 6){
+        std::cerr << "The previous right wrench is expected to be 6 dimensional" << std::endl;
+        return false;
+    }
     m_fLPrev = previousLeftWrench;
     m_fRPrev = previousRightWrench;
+    
+    return true;
 }
 
-bool MPCIpOptSolver::setWrenchConstraintsMatrix(const iDynTree::MatrixDynSize& wrenchConstraintsMatrix)
+
+bool MPCIpOptSolver::setWrenchConstraints(const iDynTree::MatrixDynSize& wrenchConstraintsMatrix, const iDynTree::VectorDynSize& constraintsBounds, const iDynTree::VectorDynSize& afterImpactConstraintsBounds)
 {
     if(wrenchConstraintsMatrix.cols() != 6){
         std::cerr << "The wrenchConstraintsMatrix is expected to have 6 columns" << std::endl;
         return false;
     }
     
+    if(wrenchConstraintsMatrix.rows() != constraintsBounds.size()){
+        std::cerr << "Unconsistent dimension between wrenchConstraintsMatrix and constraintsBounds." << std::endl;
+        return false;
+    }
+    
+    if(afterImpactConstraintsBounds.size() != constraintsBounds.size()){
+        std::cerr << "The dimension of constraints should not change across the impact." << std::endl;
+        return false;
+    }
+    
     m_wrenchA = wrenchConstraintsMatrix;
+    m_wrenchAl = wrenchConstraintsMatrix;
+    m_wrenchAr = wrenchConstraintsMatrix;
+    m_wrenchb  = constraintsBounds;
+    m_wrenchbImpact = afterImpactConstraintsBounds;
     
     return true;
 }
 
-bool MPCIpOptSolver::setWrenchConstraintsVector(const iDynTree::VectorDynSize& wrenchConstraintsBounds)
-{
-    m_wrenchb = wrenchConstraintsBounds;
-    
-    return true;
-}
 
-void MPCIpOptSolver::setLeftFootTransform(const iDynTree::Transform& w_H_l)
+bool MPCIpOptSolver::setFeetTransforms(const iDynTree::Transform& w_H_l, const iDynTree::Transform& w_H_r)
 {
     m_wHl = w_H_l;
-}
-
-void MPCIpOptSolver::setRightFootTransform(const iDynTree::Transform& w_H_r)
-{
     m_wHr = w_H_r;
+    if(m_wrenchAl.rows() != 0){
+        if(!computeWrenchConstraints()){
+            std::cerr << "Error while computing the wrench constraints." << std::endl;
+            return false;
+        }
+    }
+    return true;
 }
 
-void MPCIpOptSolver::setDesiredCOMPosition(const iDynTree::Position& desiredCOM)
+
+bool MPCIpOptSolver::setDesiredCOMPosition(const iDynTree::Position& desiredCOM)
 {
     Eigen::Map<const Eigen::VectorXd> desiredCOM_map(desiredCOM.data(), 3);
     iDynTree::toEigen(m_desiredGamma).head<3>() = desiredCOM_map;
+    return true;
 }
 
 bool MPCIpOptSolver::setGammaWeight(const iDynTree::VectorDynSize& gammaWeight)
@@ -163,7 +192,7 @@ bool MPCIpOptSolver::setPostImpactGammaWeight(const iDynTree::VectorDynSize& gam
 bool MPCIpOptSolver::setWrenchsWeight(const iDynTree::VectorDynSize& wrenchWeight)
 {
     if(wrenchWeight.size() != 12){
-        std::cerr << "The wrenchWeight vector is expected to be 9 dimensional" << std::endl;
+        std::cerr << "The wrenchWeight vector is expected to be 12 dimensional" << std::endl;
         return false;
     }
     m_wrenchWeight = wrenchWeight;
@@ -173,7 +202,7 @@ bool MPCIpOptSolver::setWrenchsWeight(const iDynTree::VectorDynSize& wrenchWeigh
 bool MPCIpOptSolver::setWrenchDerivativeWeight(const iDynTree::VectorDynSize& derivativeWrenchWeight)
 {
     if(derivativeWrenchWeight.size() != 12){
-        std::cerr << "The derivativeWrenchWeight vector is expected to be 9 dimensional" << std::endl;
+        std::cerr << "The derivativeWrenchWeight vector is expected to be 12 dimensional" << std::endl;
         return false;
     }
     m_derivativeWrenchWeight = derivativeWrenchWeight;
@@ -207,8 +236,8 @@ bool MPCIpOptSolver::computeModelMatrices()
     map_EvGamma.block<3,3>(0,3) = m_dT*identity9.block<3,3>(0,0);
     valuesEV.addDiagonalMatrix(0, 3, m_dT, 3);
 
-    Eigen::Map <Eigen::VectorXd> fl_map(m_fLPrev.data(), 6);
-    Eigen::Map <Eigen::VectorXd> fr_map (m_fRPrev.data(), 6);
+    Eigen::Map <Eigen::VectorXd> fl_map(m_fLPrev.data(), m_fLPrev.size());
+    Eigen::Map <Eigen::VectorXd> fr_map (m_fRPrev.data(), m_fRPrev.size());
     Eigen::Vector3d temp = fl_map.head(3) + fr_map.head(3);
     iDynTree::toEigen(m_skewBuffer) = m_dT * iDynTree::skew(temp);
     map_EvGamma.block<3,3>(6,0) = iDynTree::toEigen(m_skewBuffer);
@@ -258,8 +287,8 @@ bool MPCIpOptSolver::computeModelBias()
     Eigen::Map <Eigen::VectorXd> bias_map (m_bias.data(), 9);
     
     bias_map[5] = -m_g*m_dT;
-    Eigen::Map <Eigen::VectorXd> fl_map(m_fLPrev.data(), 6);
-    Eigen::Map <Eigen::VectorXd> fr_map (m_fRPrev.data(), 6);
+    Eigen::Map <Eigen::VectorXd> fl_map (m_fLPrev.data(), m_fLPrev.size());
+    Eigen::Map <Eigen::VectorXd> fr_map (m_fRPrev.data(), m_fRPrev.size());
     Eigen::Map <Eigen::VectorXd> gamma0_map(m_gamma0.data(), 9);
     
     Eigen::Vector3d temp = fl_map.head<3>() + fr_map.head<3>();
@@ -321,6 +350,11 @@ bool MPCIpOptSolver::computeModelConstraintsJacobian()
 
 bool MPCIpOptSolver::computeWrenchConstraints()
 {
+    if(m_wrenchAl.rows() == 0){
+        std::cerr << "First you have to load the wrenchConstraintsMatrix." << std::endl;
+        return false;
+    }
+    
     iDynTree::iDynTreeEigenMatrixMap Al_map = iDynTree::toEigen(m_wrenchAl);
     iDynTree::iDynTreeEigenMatrixMap Ar_map = iDynTree::toEigen(m_wrenchAr);
     iDynTree::iDynTreeEigenMatrixMap A_map = iDynTree::toEigen(m_wrenchA);
@@ -445,6 +479,69 @@ bool MPCIpOptSolver::computeCostHessian()
     return true;
 }
 
+bool MPCIpOptSolver::prepareProblem()
+{
+    if(!computeModelMatrices()){
+        std::cerr << "Error while computing the model matrices." << std::endl;
+        return false;
+    }
+    if(!computeModelBias()){
+        std::cerr << "Error while computing the model bias." << std::endl;
+        return false;
+    }
+    if(!computeModelConstraintsJacobian()){
+        std::cerr << "Error while computing the model constraints jacobian." << std::endl;
+        return false;
+    }
+    if(!computeWrenchConstraints()){
+        std::cerr << "Error while computing the wrench constraints." << std::endl;
+        return false;
+    }
+    if(!computeWrenchConstraintsJacobian()){
+        std::cerr << "Error while computing the wrench constraints jacobian." << std::endl;
+        return false;
+    }
+    if(!computeCostHessian()){
+        std::cerr << "Error while computing the wrench constraints jacobian." << std::endl;
+        return false;
+    }
+    
+    return true;
+}
+
+
+bool MPCIpOptSolver::updateProblem()
+{
+    if(!computeModelMatrices()){
+        std::cerr << "Error while computing the model matrices." << std::endl;
+        return false;
+    }
+    if(!computeModelBias()){
+        std::cerr << "Error while computing the model bias." << std::endl;
+        return false;
+    }
+    if(!computeWrenchConstraints()){
+        std::cerr << "Error while computing the wrench constraints." << std::endl;
+        return false;
+    }
+    return true;
+}
+
+int MPCIpOptSolver::getSolution(iDynTree::VectorDynSize& fL, iDynTree::VectorDynSize& fR, iDynTree::VectorDynSize& lastGamma)
+{
+    if(m_previousSolution.size() > 21){
+        Eigen::Map<Eigen::VectorXd> solution_map(m_previousSolution.data(),m_previousSolution.size());
+        fL.resize(6);
+        fR.resize(6);
+        lastGamma.resize(9);
+        iDynTree::toEigen(fL) = solution_map.segment<6>(9);
+        iDynTree::toEigen(fR) = solution_map.segment<6>(9+6);
+        iDynTree::toEigen(lastGamma) = solution_map.segment<9>(9*(m_horizon-1));
+    }
+    
+    return m_exitCode;
+}
+
 
 bool MPCIpOptSolver::get_nlp_info(Ipopt::Index& n, Ipopt::Index& m, Ipopt::Index& nnz_jac_g, Ipopt::Index& nnz_h_lag, Ipopt::TNLP::IndexStyleEnum& index_style)
 {
@@ -472,7 +569,10 @@ bool MPCIpOptSolver::get_bounds_info(Ipopt::Index n, Ipopt::Number* x_l, Ipopt::
     }
     
     for (Ipopt::Index c = 0; c < m; ++c) {
-        g_l[c] = -2e+19;
+        if(c < (9*m_horizon))
+            g_l[c] = 0;  //State constraints are equality
+        else g_l[c] = -2e+19;
+        
         g_u[c] =  0;
     }
     
@@ -518,8 +618,8 @@ bool MPCIpOptSolver::eval_f(Ipopt::Index n, const Ipopt::Number* x, bool new_x, 
     double wrenchCost = 0;
     double impactCost = 0;
     double wrenchDiffCost = 0;
-    Eigen::Map <Eigen::VectorXd> fl_map(m_fLPrev.data(), 6);
-    Eigen::Map <Eigen::VectorXd> fr_map(m_fRPrev.data(), 6);
+    Eigen::Map <Eigen::VectorXd> fl_map(m_fLPrev.data(), m_fLPrev.size());
+    Eigen::Map <Eigen::VectorXd> fr_map(m_fRPrev.data(), m_fRPrev.size());
         
     for(int t=0; t < m_horizon; ++t){
         gammaCost += 0.5*(x_map.segment<9>(21*t) - iDynTree::toEigen(m_desiredGamma)).transpose() * gammaWeight_map.asDiagonal() * (x_map.segment<9>(21*t) - iDynTree::toEigen(m_desiredGamma));
@@ -553,8 +653,8 @@ bool MPCIpOptSolver::eval_grad_f(Ipopt::Index n, const Ipopt::Number* x, bool ne
     Eigen::Map<const Eigen::VectorXd > gammaImpactWeight_map(m_gammaWeightImpact.data(),m_gammaWeightImpact.size());
     Eigen::Map<const Eigen::VectorXd > wrenchWeight_map(m_wrenchWeight.data(),m_wrenchWeight.size());
     Eigen::Map<const Eigen::VectorXd > derivativeWrenchWeight_map(m_derivativeWrenchWeight.data(),m_derivativeWrenchWeight.size());
-    Eigen::Map <Eigen::VectorXd> fl_map(m_fLPrev.data(), 6);
-    Eigen::Map <Eigen::VectorXd> fr_map(m_fRPrev.data(), 6);
+    Eigen::Map <Eigen::VectorXd> fl_map(m_fLPrev.data(), m_fLPrev.size());
+    Eigen::Map <Eigen::VectorXd> fr_map(m_fRPrev.data(), m_fRPrev.size());
     
     for(int t=0; t<m_horizon; ++t){
         //Gamma
@@ -591,7 +691,9 @@ bool MPCIpOptSolver::eval_g(Ipopt::Index n, const Ipopt::Number* x, bool new_x, 
     Eigen::Map <Eigen::VectorXd> bias_map (m_bias.data(), 9);
     iDynTree::iDynTreeEigenMatrixMap Al_map = iDynTree::toEigen(m_wrenchAl);
     iDynTree::iDynTreeEigenMatrixMap Ar_map = iDynTree::toEigen(m_wrenchAr);
-    Eigen::Map <Eigen::VectorXd> b_map(m_wrenchb.data(),6);
+    Eigen::Map <Eigen::VectorXd> b_map(m_wrenchb.data(),m_wrenchb.size());
+    Eigen::Map <Eigen::VectorXd> bImpact_map(m_wrenchbImpact.data(),m_wrenchbImpact.size());
+    
     
     unsigned int nConstraintsL = m_wrenchAl.rows();
     unsigned int nConstraintsR = m_wrenchAr.rows();
@@ -606,9 +708,23 @@ bool MPCIpOptSolver::eval_g(Ipopt::Index n, const Ipopt::Number* x, bool new_x, 
         }
         
         constraintOffset = 21*m_horizon + (nConstraintsL+ nConstraintsR)*t;
-        g_map.segment(constraintOffset, nConstraintsL) = Al_map*x_map.segment<6>(9 + 21*t) - b_map;
-        constraintOffset += 6;
-        g_map.segment(constraintOffset, nConstraintsR) = Al_map*x_map.segment<6>(9 + 21*t + 6) - b_map;
+        if(t < m_impact){
+            if(m_rightFootStep){
+                g_map.segment(constraintOffset, nConstraintsL) = Al_map*x_map.segment<6>(9 + 21*t) - bImpact_map;
+                constraintOffset += 6;
+                g_map.segment(constraintOffset, nConstraintsR) = Ar_map*x_map.segment<6>(9 + 21*t + 6) - b_map;
+            }
+            else{
+                g_map.segment(constraintOffset, nConstraintsL) = Al_map*x_map.segment<6>(9 + 21*t) - b_map;
+                constraintOffset += 6;
+                g_map.segment(constraintOffset, nConstraintsR) = Ar_map*x_map.segment<6>(9 + 21*t + 6) - bImpact_map;
+            }
+        }
+        else{
+            g_map.segment(constraintOffset, nConstraintsL) = Al_map*x_map.segment<6>(9 + 21*t) - bImpact_map;
+            constraintOffset += 6;
+            g_map.segment(constraintOffset, nConstraintsR) = Ar_map*x_map.segment<6>(9 + 21*t + 6) - bImpact_map;
+        }
     }
     return true;
 }

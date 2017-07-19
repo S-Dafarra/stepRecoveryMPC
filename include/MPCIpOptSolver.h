@@ -40,14 +40,15 @@ class MPCIpOptSolver : public Ipopt::TNLP {
     unsigned int m_horizon;
     double m_g;
     unsigned int m_impact;
+    bool m_rightFootStep;
     double m_mass;
     
     iDynTree::VectorFixSize<9> m_gamma0;
-    iDynTree::VectorFixSize<6> m_fLPrev, m_fRPrev;
+    iDynTree::VectorDynSize m_fLPrev, m_fRPrev;
     
     iDynTree::MatrixDynSize m_wrenchA, m_wrenchAl, m_wrenchAr;
     iDynTree::SparseMatrix m_wrenchAlSparse, m_wrenchArSparse;
-    iDynTree::VectorDynSize m_wrenchb;
+    iDynTree::VectorDynSize m_wrenchb, m_wrenchbImpact;
     
     iDynTree::Transform m_wHl, m_wHr;
     
@@ -90,21 +91,17 @@ public:
     
     bool setRobotMass(const double mass);
     
-    void setImpactInstant(unsigned int impact);
+    bool setImpactInstant(unsigned int impact, bool rightFootStepping = true);
     
-    void setGamma0(const iDynTree::VectorFixSize<9>& gamma0);
+    bool setGamma0(const iDynTree::VectorFixSize<9>& gamma0);
     
-    void setPreviousWrench(const iDynTree::VectorFixSize<6>& previousLeftWrench, const iDynTree::VectorFixSize<6>& previousRightWrench);
+    bool setPreviousWrench(const iDynTree::VectorDynSize& previousLeftWrench, const iDynTree::VectorDynSize& previousRightWrench);
     
-    bool setWrenchConstraintsMatrix(const iDynTree::MatrixDynSize& wrenchConstraintsMatrix);
+    bool setWrenchConstraints(const iDynTree::MatrixDynSize& wrenchConstraintsMatrix, const iDynTree::VectorDynSize& constraintsBounds, const iDynTree::VectorDynSize& afterImpactConstraintsBounds);
     
-    bool setWrenchConstraintsVector(const iDynTree::VectorDynSize& wrenchConstraintsBounds);
+    bool setFeetTransforms(const iDynTree::Transform& w_H_l, const iDynTree::Transform& w_H_r);
     
-    void setLeftFootTransform(const iDynTree::Transform& w_H_l);
-    
-    void setRightFootTransform(const iDynTree::Transform& w_H_r);
-    
-    void setDesiredCOMPosition(const iDynTree::Position& desiredCOM);
+    bool setDesiredCOMPosition(const iDynTree::Position& desiredCOM);
     
     bool setGammaWeight(const iDynTree::VectorDynSize& gammaWeight);
     
@@ -113,6 +110,12 @@ public:
     bool setWrenchsWeight(const iDynTree::VectorDynSize& wrenchWeight);
     
     bool setWrenchDerivativeWeight(const iDynTree::VectorDynSize& derivativeWrenchWeight);
+    
+    bool prepareProblem();
+    
+    bool updateProblem();
+    
+    int getSolution(iDynTree::VectorDynSize& fL, iDynTree::VectorDynSize& fR, iDynTree::VectorDynSize& lastGamma);
     
     // IPOPT methods redefinition
     

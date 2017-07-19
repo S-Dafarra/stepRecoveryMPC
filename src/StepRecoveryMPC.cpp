@@ -14,13 +14,31 @@
 #include <yarp/os/all.h>
 #include <yarp/dev/all.h>
 #include <yarp/sig/all.h>
+#include <iDynTree/Core/EigenHelpers.h>
+#include <Eigen/Core>
+#include <cmath>
 
 StepRecoveryMPC::StepRecoveryMPC()
 :m_configured(false)
+,m_reOptimize(false)
+,m_dT(0)
+,m_horizon(0)
+,m_stepDuration(0)
+,m_stateL(Standing)
+,m_stateR(Standing)
+,m_kImpact(0)
+,m_robotMass(30)
 {
+    m_prevL.resize(6);
+    m_prevL.zero();
+    m_prevR.resize(6);
+    m_prevR.zero();
+    
     solverPointer = new MPCIpOptSolver();
     loader = IpoptApplicationFactory();
-    //TODO INSERT CONSTANT JACOBIAN AND HESSIAN
+    loader->Options()->SetStringValue("jac_c_constant",   "yes");
+    loader->Options()->SetStringValue("jac_d_constant",   "yes");
+    loader->Options()->SetStringValue("hessian_constant", "yes");
 }
 
 StepRecoveryMPC::~StepRecoveryMPC()
@@ -53,8 +71,19 @@ bool StepRecoveryMPC::getVectorFromValue(yarp::os::Value& input, iDynTree::Vecto
 
 bool StepRecoveryMPC::configure(yarp::os::Searchable& mpcOptions)
 {
-    double dT = mpcOptions.check("dT", yarp::os::Value(0.01)).asDouble();
-    int horizon = mpcOptions.check("horizon", yarp::os::Value(25)).asInt();
+    m_dT = mpcOptions.check("dT", yarp::os::Value(0.01)).asDouble();
+    m_horizon = mpcOptions.check("horizon", yarp::os::Value(25)).asInt();
+    
+    if(! solverPointer->setTimeSettings(m_dT, m_horizon))
+        return false;
+    
+    m_stepDuration = mpcOptions.check("step_duration", yarp::os::Value(0.6)).asDouble();
+    m_frictionCoeff = mpcOptions.check("friction_coefficient", yarp::os::Value(0.3333)).asDouble();
+    m_torsionalFrictionCoeff = mpcOptions.check("torsional_friction_coeff", yarp::os::Value(0.0133)).asDouble();
+    m_edgesPyramid = mpcOptions.check("edges_friction_pyramid", yarp::os::Value(4)).asInt();
+    m_fzMin = mpcOptions.check("normalForce_min", yarp::os::Value(10.0)).asDouble();
+    m_fzMax = mpcOptions.check("normailForce_max", yarp::os::Value(800.0)).asDouble();
+    
     
     yarp::os::Value feetDimensions = mpcOptions.find("foot_size");
     if (feetDimensions.isNull() || !feetDimensions.isList())
@@ -109,12 +138,414 @@ bool StepRecoveryMPC::configure(yarp::os::Searchable& mpcOptions)
     m_footDimensions[1].second = std::max(limit1, limit2);
     
     yarp::os::Value tempValue;
-    iDynTree::VectorDynSize tempVector;
-    tempValue = mpcOptions.find("CoM_Weight");
+    iDynTree::VectorDynSize pos, vel, ang, gamma;
     
-    //TODO READ DI TUTTI I VALORI
+    tempValue = mpcOptions.find("CoM_Weight");
+    if(! this->getVectorFromValue(tempValue, pos)){
+        std::cerr << "Initialization failed while reading CoM_Weight vector." << std::endl;
+        return false;
+    }
+    
+    tempValue = mpcOptions.find("CoMVelocity_Weight");
+    if(! this->getVectorFromValue(tempValue, vel)){
+        std::cerr << "Initialization failed while reading CoMVelocity_Weight vector." << std::endl;
+        return false;
+    }
+    
+    tempValue = mpcOptions.find("AngMom_Weight");
+    if(! this->getVectorFromValue(tempValue, ang)){
+        std::cerr << "Initialization failed while reading AngMom_Weight vector." << std::endl;
+        return false;
+    }
+    
+    gamma.resize(pos.size()+vel.size()+ang.size());
+    iDynTree::toEigen(gamma).head(pos.size()) = iDynTree::toEigen(pos);
+    iDynTree::toEigen(gamma).segment(pos.size(), vel.size()) = iDynTree::toEigen(vel);
+    iDynTree::toEigen(gamma).tail(ang.size()) = iDynTree::toEigen(ang);
+    
+    if (! solverPointer->setGammaWeight(gamma))
+        return false;
+    
+    tempValue = mpcOptions.find("CoM_ImpactWeight");
+    if(! this->getVectorFromValue(tempValue, pos)){
+        std::cerr << "Initialization failed while reading CoM_ImpactWeight vector." << std::endl;
+        return false;
+    }
+    
+    tempValue = mpcOptions.find("CoMVelocity_ImpactWeight");
+    if(! this->getVectorFromValue(tempValue, vel)){
+        std::cerr << "Initialization failed while reading CoMVelocity_ImpactWeight vector." << std::endl;
+        return false;
+    }
+    
+    tempValue = mpcOptions.find("AngMom_ImpactWeight");
+    if(! this->getVectorFromValue(tempValue, ang)){
+        std::cerr << "Initialization failed while reading AngMom_ImpactWeight vector." << std::endl;
+        return false;
+    }
+    
+    gamma.resize(pos.size()+vel.size()+ang.size());
+    iDynTree::toEigen(gamma).head(pos.size()) = iDynTree::toEigen(pos);
+    iDynTree::toEigen(gamma).segment(pos.size(), vel.size()) = iDynTree::toEigen(vel);
+    iDynTree::toEigen(gamma).tail(ang.size()) = iDynTree::toEigen(ang);
+    
+    if(! solverPointer->setPostImpactGammaWeight(gamma))
+        return false;
+    
+    iDynTree::VectorDynSize left, right, wrenches;
+    tempValue = mpcOptions.find("LeftWrench_Weight");
+    if(! this->getVectorFromValue(tempValue, left)){
+        std::cerr << "Initialization failed while reading LeftWrench_Weight vector." << std::endl;
+        return false;
+    }
+    
+    tempValue = mpcOptions.find("RightWrench_Weight");
+    if(! this->getVectorFromValue(tempValue, right)){
+        std::cerr << "Initialization failed while reading RightWrench_Weight vector." << std::endl;
+        return false;
+    }
+
+    wrenches.resize(left.size()+right.size());
+    iDynTree::toEigen(wrenches).head(left.size()) = iDynTree::toEigen(left);
+    iDynTree::toEigen(wrenches).tail(right.size()) = iDynTree::toEigen(right);
+    
+    if(! solverPointer->setWrenchsWeight(wrenches))
+        return false;
+    
+    tempValue = mpcOptions.find("LeftWrench_DiffWeight");
+    if(! this->getVectorFromValue(tempValue, left)){
+        std::cerr << "Initialization failed while reading LeftWrench_DiffWeight vector." << std::endl;
+        return false;
+    }
+    
+    tempValue = mpcOptions.find("RightWrench_DiffWeight");
+    if(! this->getVectorFromValue(tempValue, right)){
+        std::cerr << "Initialization failed while reading RightWrench_DiffWeight vector." << std::endl;
+        return false;
+    }
+    
+    wrenches.resize(left.size()+right.size());
+    iDynTree::toEigen(wrenches).head(left.size()) = iDynTree::toEigen(left);
+    iDynTree::toEigen(wrenches).tail(right.size()) = iDynTree::toEigen(right);
+    
+    if(! solverPointer->setWrenchDerivativeWeight(wrenches))
+        return false;
+    
+    if(!computeWrenchConstraints())
+        return false;
+    
+    
+    if(! solverPointer->prepareProblem()){
+        std::cerr << "Error while preparing the optimization problem." << std::endl;
+        return false;
+    }
+    
+    Ipopt::ApplicationReturnStatus status = loader->Initialize();
+    
+    if(status != Ipopt::Solve_Succeeded){
+        std::cerr<<"Error during IPOPT solver initialization"<< std::endl;
+        return false;
+    }
     
     m_configured = true;
     return true;
+}
+
+bool StepRecoveryMPC::computeWrenchConstraints()
+{
+    if(m_frictionCoeff <= 0){
+        std::cerr << "The friction coefficient is expected to be positive." <<std::endl;
+        return false;
+    }
+    if(m_torsionalFrictionCoeff <= 0){
+        std::cerr << "The torsional friction coefficient is expected to be positive." <<std::endl;
+        return false;
+    }
+    
+    if(m_edgesPyramid <= 0){
+        std::cerr << "The number of edges of the friction pyramid should be greater than 0" <<std::endl;
+        return false;
+    }
+    
+    if(m_fzMin <= 0){
+        std::cerr << "The minimum normal force is expected to be positive." <<std::endl;
+        return false;
+    }
+    
+    if(m_fzMax <= 0){
+        std::cerr << "The maximum normal force is expected to be positive." <<std::endl;
+        return false;
+    }
+    
+    if(m_fzMax < m_fzMin){
+        std::cerr << "The maximum normal force is expected to be greater than the minimum." <<std::endl;
+        return false;
+    }
+    
+    m_wrenchConstrMatrix.resize(m_edgesPyramid+8, 6); //There are m_edgesPyramid constraints for friction pyramid, 4 for the CoP, 2 for the torsional friction, 2 for the bounds on the normal force.
+    m_wrenchConstrMatrix.zero();
+    
+    m_wrenchConstrVector.resize(m_wrenchConstrMatrix.rows());
+    m_wrenchConstrVector.zero();
+    m_afterImpactwrenchConstrVector.resize(m_wrenchConstrMatrix.rows());
+    m_afterImpactwrenchConstrVector.zero();
+    
+    double angle = 0;
+    double sectorAngle = 2*M_PI/m_edgesPyramid;
+    double angularCoeff, offset;
+    int inequalityFactor = 1;
+    std::pair <double, double> point1, point2;
+    for(int edge = 0; edge < m_edgesPyramid; ++edge){
+        point1.first = std::cos(angle);
+        point1.second = std::sin(angle);
+        
+        if(edge == m_edgesPyramid-1){
+            point2.first = std::cos(0);
+            point2.second = std::sin(0);
+        }
+        else{
+            point2.first = std::cos(angle+sectorAngle);
+            point2.second = std::sin(angle+sectorAngle);
+        }
+        
+        angularCoeff = (point2.second - point1.second)/(point2.first - point1.first);
+        offset = point1.second - angularCoeff*point1.first;
+        
+        inequalityFactor = 1;
+        if((angle > M_PI)|| ((angle+sectorAngle) > M_PI))
+            inequalityFactor = -1;
+        
+        m_wrenchConstrMatrix(edge, 0) = -inequalityFactor*angularCoeff;
+        m_wrenchConstrMatrix(edge, 1) = inequalityFactor;
+        m_wrenchConstrMatrix(edge, 2) = -inequalityFactor*offset*m_frictionCoeff;
+        
+        angle += sectorAngle;
+    }
+    unsigned int row = m_edgesPyramid;
+    iDynTree::toEigen(m_wrenchConstrMatrix).row(row) << 0, 0, -m_torsionalFrictionCoeff, 0, 0, 1;
+    row++;
+    iDynTree::toEigen(m_wrenchConstrMatrix).row(row) << 0, 0, -m_torsionalFrictionCoeff, 0, 0, -1;
+    row++;
+    iDynTree::toEigen(m_wrenchConstrMatrix).row(row) << 0, 0, m_footDimensions[0].first, 0, 1, 0;
+    row++;
+    iDynTree::toEigen(m_wrenchConstrMatrix).row(row) << 0, 0, -m_footDimensions[0].second, 0, -1, 0;
+    row++;
+    iDynTree::toEigen(m_wrenchConstrMatrix).row(row) << 0, 0, m_footDimensions[1].first, -1, 0, 0;
+    row++;
+    iDynTree::toEigen(m_wrenchConstrMatrix).row(row) << 0, 0, -m_footDimensions[1].second, 1, 0, 0;
+    row++;
+    iDynTree::toEigen(m_wrenchConstrMatrix).row(row) << 0, 0, -1, 0, 0, 0;
+    row++;
+    iDynTree::toEigen(m_wrenchConstrMatrix).row(row) << 0, 0, 1, 0, 0, 0;
+    
+    m_afterImpactwrenchConstrVector(m_afterImpactwrenchConstrVector.size() - 2) = -m_fzMin;
+    m_afterImpactwrenchConstrVector(m_afterImpactwrenchConstrVector.size() - 1) = m_fzMax;
+    
+    solverPointer->setWrenchConstraints(m_wrenchConstrMatrix, m_wrenchConstrVector, m_afterImpactwrenchConstrVector);
+    
+    return true;
+}
+
+bool StepRecoveryMPC::getControllerData(const iDynTree::VectorDynSize& controllerData)
+{
+    if(controllerData.size() != m_inputData.expectedControllerDim){
+        std::cerr << "The dimension of the data coming from the controller doens't match the expected dimension. Input = "<< controllerData.size() << ". Expected = " << m_inputData.expectedControllerDim << std::endl;
+        return false;
+    }
+    Eigen::Map<const Eigen::VectorXd> controllerData_map(controllerData.data(), m_inputData.expectedControllerDim);
+    
+    iDynTree::Position pos;
+    iDynTree::Vector4 quat;
+    iDynTree::Rotation rot;
+    unsigned int row = 0;
+    
+    iDynTree::toEigen(pos) = controllerData_map.head<3>();
+    row += 3;
+    iDynTree::toEigen(quat) = controllerData_map.segment<4>(row);
+    row +=4;
+    rot.fromQuaternion(quat);
+    m_inputData.leftTransform.setPosition(pos);
+    m_inputData.leftTransform.setRotation(rot);
+    
+    
+    iDynTree::toEigen(pos) = controllerData_map.segment<3>(row);
+    row += 3;
+    iDynTree::toEigen(quat) = controllerData_map.segment<4>(row);
+    row += 4;
+    rot.fromQuaternion(quat);
+    m_inputData.rightTransform.setPosition(pos);
+    m_inputData.rightTransform.setRotation(rot);
+    
+    iDynTree::toEigen(m_inputData.gamma) = controllerData_map.segment<9>(row);
+    row += 9;
+    
+    m_inputData.kImpact = std::round(controllerData(row));
+    row++;
+    
+    m_inputData.comZDes = controllerData(row);
+    row++;
+    
+    m_inputData.robotMass = controllerData(row);
+    row++;
+    
+    m_inputData.controllerState = std::round(controllerData(row));
+    row++;
+    
+    if(m_inputData.controllerState == 14){
+        m_stateL = Standing;
+        m_stateR = Swinging;
+    }
+    
+    if(m_inputData.controllerState == 15){
+        m_stateL = Standing;
+        m_stateR = Standing;
+    }
+    
+    if(m_inputData.controllerState == 16){
+        m_stateL = Standing;
+        m_stateR = Floating;
+    }
+
+    return true;
+}
+
+bool StepRecoveryMPC::getGamma()
+{
+    m_gamma0 = m_inputData.gamma;
+    m_robotMass = m_inputData.robotMass;
+    return solverPointer->setGamma0(m_gamma0) && solverPointer->setRobotMass(m_robotMass);
+}
+
+bool StepRecoveryMPC::computeImpactInstant()
+{
+    m_kImpact = m_inputData.kImpact;
+    return solverPointer->setImpactInstant(m_kImpact, true); //TODO BETTER HANDLING OF THE SWING FOOT, MAYBE USING THE FootState
+}
+
+bool StepRecoveryMPC::setDesiredCoM()
+{
+    iDynTree::Position desiredCoM;
+    Eigen::Map <Eigen::VectorXd> desiredCoM_map(desiredCoM.data(), 3);
+    if(m_stateL == Standing){
+        if(m_stateR == Standing){
+            desiredCoM = m_inputData.leftTransform.getPosition() + m_inputData.rightTransform.getPosition();
+            desiredCoM_map = desiredCoM_map/2;
+        }
+        else{
+            desiredCoM = m_inputData.leftTransform.getPosition();
+        }
+    }
+    else{
+        desiredCoM = m_inputData.rightTransform.getPosition();
+    }
+    
+    return solverPointer->setDesiredCOMPosition(desiredCoM);
+}
+
+bool StepRecoveryMPC::setPreviousWrench()
+{
+    return solverPointer->setPreviousWrench(m_prevL, m_prevR);
+}
+
+
+bool StepRecoveryMPC::solve(const iDynTree::VectorDynSize& controllerData, iDynTree::VectorDynSize& fL, iDynTree::VectorDynSize& fR, iDynTree::VectorDynSize& lastGamma)
+{
+    if(!m_configured){
+        std::cerr <<"First you have to call the configure method." << std::endl;
+        return false;
+    }
+    
+    if(!getControllerData(controllerData)){
+        std::cerr << "Error while reading the data from the controller." << std::endl;
+        return false;
+    }
+    
+    if(!getGamma()){
+        std::cerr << "Error while setting the feedback." << std::endl;
+        return false;
+    }
+    
+    if(!computeImpactInstant()){
+        std::cerr << "Error while setting the impact instant." << std::endl;
+        return false;
+    }
+    
+    if(!setDesiredCoM()){
+        std::cerr << "Error while setting the desired CoM." << std::endl;
+        return false;
+    }
+    
+    if(!setPreviousWrench()){
+        std::cerr << "Error while setting the previous wrench." << std::endl;
+        return false;
+    }
+
+    if(! solverPointer->updateProblem()){
+        std::cerr << "Error while updating the optimization problem." << std::endl;
+        return false;
+    }
+    
+    int exitCode;
+    
+    if(m_reOptimize){
+        loader->ReOptimizeTNLP(solverPointer);
+        exitCode = solverPointer->getSolution(fL, fR, lastGamma);
+        if(exitCode < 0){
+            std::cerr << "Optimization problem failed!" << std::endl;
+            return false;
+        }
+        m_prevL = fL;
+        m_prevR = fR;
+    }
+    else{
+        loader->OptimizeTNLP(solverPointer);
+        exitCode = solverPointer->getSolution(fL, fR, lastGamma);
+        if(exitCode < 0){
+            std::cerr << "Optimization problem failed!" << std::endl;
+            return false;
+        }
+        m_prevL = fL;
+        m_prevR = fR;
+        m_reOptimize = true;
+    }
+    
+    return true;
+}
+
+int StepRecoveryMPC::dryRun()
+{
+    Eigen::Vector3d pL, pR;
+    iDynTree::Vector4 quatL, quatR;
+    pL << 0, 0, 0;
+    quatL = iDynTree::Rotation::Identity().asQuaternion();
+    pR << 0.05, 0.3, 0;
+    quatR = iDynTree::Rotation::RotZ(M_PI/6).asQuaternion();
+    
+    Eigen::VectorXd gamma0(9);
+    gamma0.setZero();
+    gamma0(2) = 0.5;
+    
+    double k_impact = 15;
+    
+    double comZDes = 0.5;
+    
+    double mass = 30.0;
+    
+    double state = 14;
+    
+    iDynTree::VectorDynSize dummyController;
+    dummyController.resize(27);
+    iDynTree::toEigen(dummyController) << pL, iDynTree::toEigen(quatL), pR, iDynTree::toEigen(quatR), gamma0, k_impact, comZDes, mass, state;
+    m_prevL(2) = 150;
+    m_prevR(2) = 150;
+    
+    iDynTree::VectorDynSize dummyVector;
+    return solve(dummyController, m_prevL, m_prevR, dummyVector);
+}
+
+
+void StepRecoveryMPC::setVerbosity(unsigned int level)
+{
+    loader->Options()->SetIntegerValue("print_level",level);
 }
 

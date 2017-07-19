@@ -23,40 +23,66 @@
 #include "MPCIpOptSolver.h"
 #include <IpIpoptApplication.hpp>
 
+enum FootState{
+    Standing,
+    Swinging,
+    Floating
+    };
+    
+typedef struct{
+    iDynTree::Transform leftTransform, rightTransform;
+    iDynTree::VectorFixSize<9> gamma; //TO BE REMOVED
+    unsigned int kImpact; //TO BE REMOVED
+    int controllerState;
+    double comZDes;
+    double robotMass; //TO BE REMOVED
+    unsigned int expectedControllerDim = 27;
+} ControllerData;
+
 class StepRecoveryMPC {
     
     Ipopt::SmartPtr< MPCIpOptSolver > solverPointer;
     Ipopt::SmartPtr< Ipopt::IpoptApplication > loader;
     std::vector< std::pair<double, double> > m_footDimensions;
-    bool m_configured;
+    double m_dT, m_stepDuration;
+    unsigned int m_horizon;
+    
+    bool m_configured, m_reOptimize;
+    
+    double m_frictionCoeff, m_torsionalFrictionCoeff;
+    int m_edgesPyramid;
+    double m_fzMin, m_fzMax;
+    iDynTree::MatrixDynSize m_wrenchConstrMatrix;
+    iDynTree::VectorDynSize m_wrenchConstrVector, m_afterImpactwrenchConstrVector;
+    
+    FootState m_stateL, m_stateR;
+    ControllerData m_inputData;
+    unsigned int m_kImpact;
+    double m_robotMass;
+    iDynTree::VectorFixSize<9> m_gamma0;
+    iDynTree::VectorDynSize m_prevL, m_prevR;
     
     bool getVectorFromValue(yarp::os::Value& input, iDynTree::VectorDynSize& output);
     
     bool computeWrenchConstraints();
-    
-    int dryRun();
-    int optimize();
-    int reOptimize();
-    
-    bool getCoMPosition();
+    bool getControllerData(const iDynTree::VectorDynSize& controllerData);
+    bool getGamma();
+    bool computeImpactInstant();
+    bool setDesiredCoM();
     bool setPreviousWrench();
     
-    bool setLeftFootConstraints();
-    bool setRightFootConstraints();
-    
-    bool updateConstraints();
+    int dryRun();
     
 public:
     
     StepRecoveryMPC();
     ~StepRecoveryMPC();
     
-    bool solve();
-    
-    bool getControllerData();
+    bool solve(const iDynTree::VectorDynSize& controllerData, iDynTree::VectorDynSize& fL, iDynTree::VectorDynSize& fR, iDynTree::VectorDynSize& lastGamma);
     
     bool configure(yarp::os::Searchable& mpcOptions);
     
+    void setVerbosity(unsigned int level);
 };
 
 #endif

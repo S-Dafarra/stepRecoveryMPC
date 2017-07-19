@@ -23,7 +23,6 @@ include_directories(${YARP_INCLUDE_DIRS})
 
 set(MPCIPOPT_SOURCES src/MPCIpOptSolver.cpp)
 set(MPCIPOPT_HEADERS include/MPCIpOptSolver.h)
-
 add_library(MPCIpOpt  SHARED ${MPCIPOPT_HEADERS} ${MPCIPOPT_SOURCES})
 target_include_directories(MPCIpOpt PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(MPCIpOpt ${iDynTree_LIBRARIES} ${IPOPT_LIBRARIES})
@@ -37,7 +36,6 @@ target_link_libraries(srMPC ${iDynTree_LIBRARIES} ${IPOPT_LIBRARIES})
 
 set(COORDINATOR_SOURCES src/StepRecoveryCoordinator.cpp)
 set(COORDINATOR_HEADERS include/StepRecoveryCoordinator.h)
-
 add_executable(${PROJECT_NAME} ${COORDINATOR_SOURCES} ${COORDINATOR_HEADERS})
 target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(${PROJECT_NAME} ${iDynTree_LIBRARIES} ${YARP_LIBRARIES})
