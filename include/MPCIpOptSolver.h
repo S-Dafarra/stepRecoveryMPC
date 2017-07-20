@@ -27,11 +27,9 @@
 #include <memory>
 
 typedef struct {
-    
     std::shared_ptr<iDynTree::SparseMatrix> blockPtr;
     unsigned int rowOffset;
     unsigned int colOffset;
-    
 } MatrixBlock;
 
 class MPCIpOptSolver : public Ipopt::TNLP {
@@ -47,7 +45,7 @@ class MPCIpOptSolver : public Ipopt::TNLP {
     iDynTree::VectorDynSize m_fLPrev, m_fRPrev;
     
     iDynTree::MatrixDynSize m_wrenchA, m_wrenchAl, m_wrenchAr;
-    iDynTree::SparseMatrix m_wrenchAlSparse, m_wrenchArSparse;
+    std::shared_ptr<iDynTree::SparseMatrix> m_wrenchAlSparsePtr, m_wrenchArSparsePtr;
     iDynTree::VectorDynSize m_wrenchb, m_wrenchbImpact;
     
     iDynTree::Transform m_wHl, m_wHr;
@@ -58,16 +56,16 @@ class MPCIpOptSolver : public Ipopt::TNLP {
     iDynTree::VectorDynSize m_wrenchWeight, m_derivativeWrenchWeight;
     
     iDynTree::MatrixDynSize m_EvGamma;
-    iDynTree::SparseMatrix m_EvGammaSparse;
+    std::shared_ptr<iDynTree::SparseMatrix> m_EvGammaSparsePtr;
     iDynTree::MatrixDynSize m_FGamma;
-    iDynTree::SparseMatrix m_FGammaSparse;
+    std::shared_ptr<iDynTree::SparseMatrix> m_FGammaSparsePtr;
     iDynTree::VectorFixSize<9> m_bias;
     
     std::vector<MatrixBlock> m_modelConstraintsJacobian;
     std::vector<MatrixBlock> m_wrenchConstraintJacobian;
     
     iDynTree::MatrixDynSize m_skewBuffer;
-    iDynTree::SparseMatrix m_minusIdentity;
+    std::shared_ptr<iDynTree::SparseMatrix> m_minusIdentityPtr;
     iDynTree::MatrixDynSize m_wrenchTransform;
     iDynTree::SparseMatrix m_costHessian, m_gammaWeightHessian, m_gammaWeightImpactHessian, m_wrenchWeightHessian, m_derivativeWrenchWeightHessian, m_negativeDerWrenchHessian;
     
@@ -81,6 +79,9 @@ class MPCIpOptSolver : public Ipopt::TNLP {
     bool computeWrenchConstraintsJacobian();
     bool computeSingleCostHessian();
     bool computeCostHessian();
+    
+    
+    void printJacobian(std::string header, std::vector<MatrixBlock>& input, int rows, int cols);
     
 public:
     MPCIpOptSolver();

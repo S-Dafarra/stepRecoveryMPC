@@ -15,9 +15,18 @@
 #define STEPRECOVERYCOORDINATOR_H
 
 #include <yarp/os/RFModule.h>
-#include "MPCIpOptSolver.h"
+#include "StepRecoveryMPC.h"
+#include <yarp/os/all.h>
+#include <yarp/sig/all.h>
+
+
 
 class StepRecoveryCoordinator : public yarp::os::RFModule {
+    yarp::os::BufferedPort< yarp::sig::Vector > controllerPort;
+    yarp::os::BufferedPort< yarp::sig::Vector > outputPort;
+    StepRecoveryMPC controllerMPC;
+    
+    iDynTree::VectorDynSize inputBuffer, fL, fL_prev, fR, fR_prev, lastGamma;
     
 public:
     StepRecoveryCoordinator();

@@ -31,11 +31,11 @@ set(STEPRECOVERY_SOURCES src/StepRecoveryMPC.cpp)
 set(STEPRECOVERY_HEADERS include/StepRecoveryMPC.h)
 add_library(srMPC  SHARED ${STEPRECOVERY_HEADERS} ${STEPRECOVERY_SOURCES})
 target_include_directories(srMPC PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_link_libraries(srMPC ${iDynTree_LIBRARIES} ${IPOPT_LIBRARIES})
+target_link_libraries(srMPC ${iDynTree_LIBRARIES} ${IPOPT_LIBRARIES} MPCIpOpt)
 
 
 set(COORDINATOR_SOURCES src/StepRecoveryCoordinator.cpp)
 set(COORDINATOR_HEADERS include/StepRecoveryCoordinator.h)
 add_executable(${PROJECT_NAME} ${COORDINATOR_SOURCES} ${COORDINATOR_HEADERS})
 target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_link_libraries(${PROJECT_NAME} ${iDynTree_LIBRARIES} ${YARP_LIBRARIES})
+target_link_libraries(${PROJECT_NAME} ${iDynTree_LIBRARIES} ${YARP_LIBRARIES} srMPC)

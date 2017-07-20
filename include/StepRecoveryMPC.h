@@ -23,6 +23,9 @@
 #include "MPCIpOptSolver.h"
 #include <IpIpoptApplication.hpp>
 
+
+#define EXPECTED_INPUT_DIM 27
+
 enum FootState{
     Standing,
     Swinging,
@@ -36,7 +39,7 @@ typedef struct{
     int controllerState;
     double comZDes;
     double robotMass; //TO BE REMOVED
-    unsigned int expectedControllerDim = 27;
+    unsigned int expectedControllerDim = EXPECTED_INPUT_DIM;
 } ControllerData;
 
 class StepRecoveryMPC {
@@ -66,6 +69,7 @@ class StepRecoveryMPC {
     
     bool computeWrenchConstraints();
     bool getControllerData(const iDynTree::VectorDynSize& controllerData);
+    bool setFeetTransform();
     bool getGamma();
     bool computeImpactInstant();
     bool setDesiredCoM();

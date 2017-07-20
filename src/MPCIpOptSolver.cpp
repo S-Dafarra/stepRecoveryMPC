@@ -39,17 +39,21 @@ MPCIpOptSolver::MPCIpOptSolver()
     m_derivativeWrenchWeight.zero();
     m_EvGamma.resize(9,9);
     m_EvGamma.zero();
-    m_EvGammaSparse.resize(9,9);
+    m_EvGammaSparsePtr = std::make_shared<iDynTree::SparseMatrix>();
+    m_EvGammaSparsePtr->resize(9,9);
     m_FGamma.resize(9,12);
     m_FGamma.zero();
-    m_FGammaSparse.resize(9,12);
+    m_FGammaSparsePtr = std::make_shared<iDynTree::SparseMatrix>();
+    m_FGammaSparsePtr->resize(9,12);
     m_skewBuffer.resize(3,3);
     m_bias.zero();
-    m_minusIdentity.resize(9,9);
-    
+    m_minusIdentityPtr = std::make_shared<iDynTree::SparseMatrix>();
+    m_minusIdentityPtr->resize(9,9);
+    m_wrenchAlSparsePtr = std::make_shared<iDynTree::SparseMatrix>();
+    m_wrenchArSparsePtr = std::make_shared<iDynTree::SparseMatrix>();
     iDynTree::Triplets values;
     values.addDiagonalMatrix(0,0,-1,9);
-    m_minusIdentity.setFromTriplets(values);
+    m_minusIdentityPtr->setFromTriplets(values);
     
     m_wrenchTransform.resize(6,6);
     m_wrenchTransform.zero();
@@ -143,6 +147,11 @@ bool MPCIpOptSolver::setWrenchConstraints(const iDynTree::MatrixDynSize& wrenchC
     m_wrenchb  = constraintsBounds;
     m_wrenchbImpact = afterImpactConstraintsBounds;
     
+//     std::cerr << "Constr: " << std::endl << wrenchConstraintsMatrix.toString() << std::endl;
+//     std::cerr << "b: " << std::endl << constraintsBounds.toString() << std::endl;
+//     std::cerr << "bImpact: " << std::endl << afterImpactConstraintsBounds.toString() << std::endl;
+    
+    
     return true;
 }
 
@@ -151,6 +160,10 @@ bool MPCIpOptSolver::setFeetTransforms(const iDynTree::Transform& w_H_l, const i
 {
     m_wHl = w_H_l;
     m_wHr = w_H_r;
+    
+//     std::cerr << "Left Foot Transform: " << std::endl << m_wHl.toString() << std::endl;
+//     std::cerr << "Left Foot Transform: " << std::endl << m_wHr.toString() << std::endl;
+    
     if(m_wrenchAl.rows() != 0){
         if(!computeWrenchConstraints()){
             std::cerr << "Error while computing the wrench constraints." << std::endl;
@@ -165,6 +178,9 @@ bool MPCIpOptSolver::setDesiredCOMPosition(const iDynTree::Position& desiredCOM)
 {
     Eigen::Map<const Eigen::VectorXd> desiredCOM_map(desiredCOM.data(), 3);
     iDynTree::toEigen(m_desiredGamma).head<3>() = desiredCOM_map;
+    
+   // std::cerr << "desiredGamma: "<< m_desiredGamma.toString() << std::endl;
+    
     return true;
 }
 
@@ -175,6 +191,9 @@ bool MPCIpOptSolver::setGammaWeight(const iDynTree::VectorDynSize& gammaWeight)
         return false;
     }
     m_gammaWeight = gammaWeight;
+    
+  //  std::cerr << "gammaWeight: "<< m_gammaWeight.toString() << std::endl;
+
     return true;
 }
 
@@ -186,6 +205,9 @@ bool MPCIpOptSolver::setPostImpactGammaWeight(const iDynTree::VectorDynSize& gam
     }
     
     m_gammaWeightImpact = gammaImpactWeight;
+    
+   // std::cerr << "gammaWeightImpact: "<< m_gammaWeightImpact.toString() << std::endl;
+
     return true;
 }
 
@@ -196,6 +218,9 @@ bool MPCIpOptSolver::setWrenchsWeight(const iDynTree::VectorDynSize& wrenchWeigh
         return false;
     }
     m_wrenchWeight = wrenchWeight;
+    
+   // std::cerr << "wrenchWeight: "<< m_wrenchWeight.toString() << std::endl;
+
     return true;
 }
 
@@ -206,6 +231,10 @@ bool MPCIpOptSolver::setWrenchDerivativeWeight(const iDynTree::VectorDynSize& de
         return false;
     }
     m_derivativeWrenchWeight = derivativeWrenchWeight;
+    
+    //std::cerr << "wrenchWeight: "<< derivativeWrenchWeight.toString() << std::endl;
+    
+    
     return true;
 }
 
@@ -243,7 +272,7 @@ bool MPCIpOptSolver::computeModelMatrices()
     map_EvGamma.block<3,3>(6,0) = iDynTree::toEigen(m_skewBuffer);
     valuesEV.addSubMatrix(6,0,m_skewBuffer);
     
-    m_EvGammaSparse.setFromTriplets(valuesEV);
+    m_EvGammaSparsePtr->setFromTriplets(valuesEV);
     
     //F_gamma
     iDynTree::Triplets valuesF;
@@ -277,7 +306,10 @@ bool MPCIpOptSolver::computeModelMatrices()
     map_FGamma.block<3,3>(6,6) = iDynTree::toEigen(m_skewBuffer);
     valuesF.addSubMatrix(6,6,m_skewBuffer);
     
-    m_FGammaSparse.setFromTriplets(valuesF);
+    m_FGammaSparsePtr->setFromTriplets(valuesF);
+    
+//     std::cerr << "Ev: "<< std::endl << m_EvGamma.toString() << std::endl;
+//     std::cerr << "F: " << std::endl << m_FGamma.toString() << std::endl;
     
     return true;
 }
@@ -295,6 +327,8 @@ bool MPCIpOptSolver::computeModelBias()
     iDynTree::toEigen(m_skewBuffer) = m_dT * iDynTree::skew(temp);
     bias_map.tail<3>() = -m_dT*iDynTree::toEigen(m_skewBuffer)*gamma0_map.head(3);
     
+//     std::cerr << "Bias: "<< std::endl << m_bias.toString() << std::endl;
+    
     return true;
 }
 
@@ -302,11 +336,11 @@ bool MPCIpOptSolver::computeModelConstraintsJacobian()
 {
     MatrixBlock templateEv, templateF, templateId;
     
-    templateEv.blockPtr.reset(&m_EvGammaSparse);
-    templateF.blockPtr.reset(&m_FGammaSparse);
-    templateId.blockPtr.reset(&m_minusIdentity);
+    templateEv.blockPtr = m_EvGammaSparsePtr;
+    templateF.blockPtr = m_FGammaSparsePtr;
+    templateId.blockPtr = m_minusIdentityPtr;
     
-    m_modelConstraintsJacobian.resize(3*m_horizon);
+    m_modelConstraintsJacobian.resize(3*(m_horizon-1)+2);
     
     unsigned int row = 0;
     unsigned int col = 0;
@@ -345,6 +379,8 @@ bool MPCIpOptSolver::computeModelConstraintsJacobian()
         row += 9;
     }
 
+    printJacobian("Model jacobian:", m_modelConstraintsJacobian, 9*m_horizon, 21*m_horizon);
+    
     return true;
 }
 
@@ -372,15 +408,15 @@ bool MPCIpOptSolver::computeWrenchConstraints()
     
     Ar_map = A_map*wrenchTransform_map;
     
-    m_wrenchAlSparse.resize(m_wrenchAl.rows(), m_wrenchAl.cols());
-    m_wrenchArSparse.resize(m_wrenchAr.rows(), m_wrenchAr.cols());
+    m_wrenchAlSparsePtr->resize(m_wrenchAl.rows(), m_wrenchAl.cols());
+    m_wrenchArSparsePtr->resize(m_wrenchAr.rows(), m_wrenchAr.cols());
     
     iDynTree::Triplets valuesL, valuesR;
     valuesL.setSubMatrix(0,0,m_wrenchAl); //maybe we can ask for the sparsity of this matrix
-    m_wrenchAlSparse.setFromTriplets(valuesL);
+    m_wrenchAlSparsePtr->setFromTriplets(valuesL);
     
     valuesR.setSubMatrix(0,0,m_wrenchAr);
-    m_wrenchArSparse.setFromTriplets(valuesR);
+    m_wrenchArSparsePtr->setFromTriplets(valuesR);
     
     return true;
 }
@@ -389,8 +425,8 @@ bool MPCIpOptSolver::computeWrenchConstraintsJacobian()
 {
     MatrixBlock templateLeft, templateRight;
     
-    templateLeft.blockPtr.reset(&m_wrenchAlSparse);
-    templateRight.blockPtr.reset(&m_wrenchArSparse);
+    templateLeft.blockPtr = m_wrenchAlSparsePtr;
+    templateRight.blockPtr =  m_wrenchArSparsePtr;
     
     m_wrenchConstraintJacobian.resize(m_horizon*2);
     
@@ -473,8 +509,10 @@ bool MPCIpOptSolver::computeCostHessian()
             values.addSubMatrix(9 + 21*(t-1), 9 + 21*t, m_negativeDerWrenchHessian);
         }
     }
-    
+    values.addSubMatrix(21*(m_horizon-1), 21*(m_horizon-1), m_gammaWeightImpactHessian);
     m_costHessian.setFromTriplets(values);
+    
+    std::cerr << "Cost hessian: " << std::endl << m_costHessian.description(true) << std::endl;
     
     return true;
 }
@@ -707,7 +745,7 @@ bool MPCIpOptSolver::eval_g(Ipopt::Index n, const Ipopt::Number* x, bool new_x, 
             g_map.segment<9>(9*t) = -x_map.segment<9>(21*t) + map_EvGamma*x_map.segment<9>(21*(t-1)) + map_FGamma*x_map.segment<12>(9 + 21*t) + bias_map;
         }
         
-        constraintOffset = 21*m_horizon + (nConstraintsL+ nConstraintsR)*t;
+        constraintOffset = 9*m_horizon + (nConstraintsL+ nConstraintsR)*t;
         if(t < m_impact){
             if(m_rightFootStep){
                 g_map.segment(constraintOffset, nConstraintsL) = Al_map*x_map.segment<6>(9 + 21*t) - bImpact_map;
@@ -837,4 +875,20 @@ void MPCIpOptSolver::finalize_solution(Ipopt::SolverReturn status, Ipopt::Index 
         }
     }
 }
+
+void MPCIpOptSolver::printJacobian(std::string header, std::vector<MatrixBlock>& input, int rows, int cols)
+{
+    iDynTree::SparseMatrix printer;
+    printer.resize(rows, cols);
+    
+    iDynTree::Triplets filler;
+    for(int block = 0; block < input.size(); ++block){
+        for(iDynTree::SparseMatrix::Iterator val = input[block].blockPtr->begin(); val != input[block].blockPtr->end(); ++val){
+            filler.pushTriplet(iDynTree::Triplet(val->row()+input[block].rowOffset, val->column()+input[block].colOffset, val->value()));
+        }
+    }
+    printer.setFromTriplets(filler);
+    std::cerr << header << std::endl << printer.description(true) << std::endl;
+}
+
 

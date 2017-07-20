@@ -39,6 +39,10 @@ StepRecoveryMPC::StepRecoveryMPC()
     loader->Options()->SetStringValue("jac_c_constant",   "yes");
     loader->Options()->SetStringValue("jac_d_constant",   "yes");
     loader->Options()->SetStringValue("hessian_constant", "yes");
+    
+    //loader->Options()->SetStringValue("derivative_test", "second-order");
+    loader->Options()->SetIntegerValue("print_level",0);
+    
 }
 
 StepRecoveryMPC::~StepRecoveryMPC()
@@ -248,6 +252,12 @@ bool StepRecoveryMPC::configure(yarp::os::Searchable& mpcOptions)
     }
     
     m_configured = true;
+    
+    if(!dryRun()){
+        std::cerr << "Initial test failed." << std::endl;
+        return false;
+    }
+
     return true;
 }
 
@@ -409,6 +419,12 @@ bool StepRecoveryMPC::getControllerData(const iDynTree::VectorDynSize& controlle
     return true;
 }
 
+bool StepRecoveryMPC::setFeetTransform()
+{
+    return solverPointer->setFeetTransforms(m_inputData.leftTransform, m_inputData.rightTransform);
+}
+
+
 bool StepRecoveryMPC::getGamma()
 {
     m_gamma0 = m_inputData.gamma;
@@ -430,13 +446,36 @@ bool StepRecoveryMPC::setDesiredCoM()
         if(m_stateR == Standing){
             desiredCoM = m_inputData.leftTransform.getPosition() + m_inputData.rightTransform.getPosition();
             desiredCoM_map = desiredCoM_map/2;
+            desiredCoM(2) = m_inputData.comZDes;
         }
         else{
-            desiredCoM = m_inputData.leftTransform.getPosition();
+            if(m_stateR == Floating){
+                desiredCoM = m_inputData.leftTransform.getPosition();
+                desiredCoM(2) = m_inputData.comZDes;
+            }
+            else{
+                desiredCoM = m_inputData.leftTransform.getPosition() + m_inputData.rightTransform.getPosition();
+                desiredCoM_map = desiredCoM_map/2;
+                desiredCoM(2) = m_inputData.comZDes;
+            }
         }
     }
     else{
-        desiredCoM = m_inputData.rightTransform.getPosition();
+        if(m_stateR == Standing){
+            if(m_stateL == Swinging){
+                desiredCoM = m_inputData.leftTransform.getPosition() + m_inputData.rightTransform.getPosition();
+                desiredCoM_map = desiredCoM_map/2;
+                desiredCoM(2) = m_inputData.comZDes;
+            }
+            else{
+                desiredCoM = m_inputData.rightTransform.getPosition();
+                desiredCoM(2) = m_inputData.comZDes;
+            }
+        }
+        else{
+            desiredCoM = m_inputData.rightTransform.getPosition();
+            desiredCoM(2) = m_inputData.comZDes;
+        }
     }
     
     return solverPointer->setDesiredCOMPosition(desiredCoM);
@@ -457,6 +496,11 @@ bool StepRecoveryMPC::solve(const iDynTree::VectorDynSize& controllerData, iDynT
     
     if(!getControllerData(controllerData)){
         std::cerr << "Error while reading the data from the controller." << std::endl;
+        return false;
+    }
+    
+    if(!setFeetTransform()){
+        std::cerr << "Error while setting the feet transformations." << std::endl;
         return false;
     }
     
@@ -525,13 +569,13 @@ int StepRecoveryMPC::dryRun()
     gamma0.setZero();
     gamma0(2) = 0.5;
     
-    double k_impact = 15;
+    double k_impact = 0;
     
     double comZDes = 0.5;
     
     double mass = 30.0;
     
-    double state = 14;
+    double state = 15;
     
     iDynTree::VectorDynSize dummyController;
     dummyController.resize(27);
