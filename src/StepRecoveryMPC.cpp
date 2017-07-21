@@ -44,7 +44,6 @@ StepRecoveryMPC::StepRecoveryMPC()
     //loader->Options()->SetStringValue("derivative_test", "second-order");
     loader->Options()->SetIntegerValue("print_level",0);
     //loader->Options()->SetIntegerValue("max_iter",6000);
-    
 }
 
 StepRecoveryMPC::~StepRecoveryMPC()
@@ -77,6 +76,13 @@ bool StepRecoveryMPC::getVectorFromValue(yarp::os::Value& input, iDynTree::Vecto
 
 bool StepRecoveryMPC::configure(yarp::os::Searchable& mpcOptions)
 {
+    std::string solvername = mpcOptions.check("solver_name", yarp::os::Value("mumps")).asString();
+    loader->Options()->SetStringValue("linear_solver", solvername);
+    
+    loader->Options()->SetNumericValue("acceptable_tol", mpcOptions.check("accettable_tolerance", yarp::os::Value("1e-6")).asDouble());
+    
+    loader->Options()->SetIntegerValue("acceptable_iter", mpcOptions.check("acceptable_iterations", yarp::os::Value("15")).asInt());
+    
     m_dT = mpcOptions.check("dT", yarp::os::Value(0.01)).asDouble();
     m_horizon = mpcOptions.check("horizon", yarp::os::Value(25)).asInt();
     
@@ -354,8 +360,8 @@ bool StepRecoveryMPC::computeWrenchConstraints()
     row++;
     iDynTree::toEigen(m_wrenchConstrMatrix).row(row) << 0, 0, 1, 0, 0, 0;
     
-    m_wrenchConstrVector(m_wrenchConstrVector.size() - 2) = 1e-6;
-    m_wrenchConstrVector(m_wrenchConstrVector.size() - 1) = 1e-6;
+    m_wrenchConstrVector(m_wrenchConstrVector.size() - 2) = 0*1e-6;
+    m_wrenchConstrVector(m_wrenchConstrVector.size() - 1) = 0*1e-6;
     
     m_afterImpactwrenchConstrVector(m_afterImpactwrenchConstrVector.size() - 2) = -m_fzMin;
     m_afterImpactwrenchConstrVector(m_afterImpactwrenchConstrVector.size() - 1) = m_fzMax;
@@ -543,7 +549,7 @@ bool StepRecoveryMPC::solve(const iDynTree::VectorDynSize& controllerData, iDynT
     clock_t begin, end;
     
     if(m_reOptimize){
-        std::cerr << "ReOptimizeTNLP!!" << std::endl;
+        //std::cerr << "ReOptimizeTNLP!!" << std::endl;
         begin = clock();
         loader->ReOptimizeTNLP(solverPointer);
         end = clock();
@@ -579,19 +585,19 @@ int StepRecoveryMPC::dryRun()
     pL << 0, 0, 0;
     quatL = iDynTree::Rotation::Identity().asQuaternion();
     pR << 0.05, -0.3, 0;
-    quatR = iDynTree::Rotation::RotZ(0*M_PI/6).asQuaternion();
+    quatR = iDynTree::Rotation::RotZ(M_PI/6).asQuaternion();
     
     Eigen::VectorXd gamma0(9);
     gamma0.setZero();
     gamma0(2) = 0.5;
     
-    double k_impact = 0;
+    double k_impact = 12;
     
     double comZDes = 0.5;
     
     double mass = 30.0;
     
-    double state = 15;
+    double state = 14;
     
     iDynTree::VectorDynSize dummyController;
     dummyController.resize(27);

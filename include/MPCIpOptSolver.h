@@ -81,7 +81,10 @@ class MPCIpOptSolver : public Ipopt::TNLP {
     bool computeCostHessian();
     
     
-    void printJacobian(std::string header, std::vector<MatrixBlock>& input, int rows, int cols);
+    void printJacobian(const std::string header, const std::vector<MatrixBlock>& input, int rows, int cols);
+    
+    iDynTree::VectorDynSize temp_iRow, temp_jCol;
+    void printIpOptMatrix(const std::string header, Ipopt::Index nele_jac, const iDynTree::VectorDynSize& iRow, const iDynTree::VectorDynSize& jCol, Ipopt::Number* values, int rows, int cols);
     
 public:
     MPCIpOptSolver();

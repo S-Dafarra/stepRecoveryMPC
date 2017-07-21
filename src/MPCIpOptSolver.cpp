@@ -187,7 +187,7 @@ bool MPCIpOptSolver::setDesiredCOMPosition(const iDynTree::Position& desiredCOM)
     Eigen::Map<const Eigen::VectorXd> desiredCOM_map(desiredCOM.data(), 3);
     iDynTree::toEigen(m_desiredGamma).head<3>() = desiredCOM_map;
     
-   // std::cerr << "desiredGamma: "<< m_desiredGamma.toString() << std::endl;
+    std::cerr << "desiredGamma: "<< m_desiredGamma.toString() << std::endl;
     
     return true;
 }
@@ -426,6 +426,9 @@ bool MPCIpOptSolver::computeWrenchConstraints()
     valuesR.setSubMatrix(0,0,m_wrenchAr);
     m_wrenchArSparsePtr->setFromTriplets(valuesR);
     
+//    std::cerr << "Al:" << std::endl << m_wrenchAl.toString() << std::endl;
+//    std::cerr << "Ar:" << std::endl << m_wrenchAr.toString() << std::endl;
+    
     return true;
 }
 
@@ -590,10 +593,10 @@ int MPCIpOptSolver::getSolution(iDynTree::VectorDynSize& fL, iDynTree::VectorDyn
         iDynTree::toEigen(lastGamma) = solution_map.segment<9>(21*(m_horizon-1));
     }
     
-    std::cerr << "Solution left: " << fL.toString() << std::endl;
-    std::cerr << "Solution right: " << fR.toString() << std::endl;
-    std::cerr << "Solution lastGamma: " << lastGamma.toString() << std::endl;
-    std::cerr << "Full gamma: "<<m_previousSolution.toString() << std::endl;
+   // std::cerr << "Solution left: " << fL.toString() << std::endl;
+    //std::cerr << "Solution right: " << fR.toString() << std::endl;
+    //std::cerr << "Solution lastGamma: " << lastGamma.toString() << std::endl;
+   // std::cerr << "Full gamma: "<<m_previousSolution.toString() << std::endl;
     
     return m_exitCode;
 }
@@ -626,8 +629,8 @@ bool MPCIpOptSolver::get_bounds_info(Ipopt::Index n, Ipopt::Number* x_l, Ipopt::
     
     for (Ipopt::Index c = 0; c < m; ++c) {
         if(c < (9*m_horizon)){
-            g_l[c] = -1e-9;  //State constraints are equality
-            g_u[c] = 1e-9;
+            g_l[c] = -1e-9*0;  //State constraints are equality
+            g_u[c] = 1e-9*0;
         }
         else{
             g_l[c] = -2e+19;
@@ -686,9 +689,9 @@ bool MPCIpOptSolver::eval_f(Ipopt::Index n, const Ipopt::Number* x, bool new_x, 
         if((t >= m_impact)&&(t < (m_horizon-1))){
             impactCost += 0.5*(x_map.segment<9>(21*t) - iDynTree::toEigen(m_desiredGamma)).transpose() * gammaImpactWeight_map.asDiagonal() * (x_map.segment<9>(21*t) - iDynTree::toEigen(m_desiredGamma));
         }
-        std::cerr << "Gamma: " << x_map.segment<9>(21*t).transpose() << std::endl;
-        std::cerr << "Gamma Des: " << m_desiredGamma.toString() << std::endl;
-        std::cerr << "Gamma error: "<< x_map.segment<9>(21*t).transpose() - iDynTree::toEigen(m_desiredGamma).transpose() << std::endl;
+//         std::cerr << "Gamma: " << x_map.segment<9>(21*t).transpose() << std::endl;
+//         std::cerr << "Gamma Des: " << m_desiredGamma.toString() << std::endl;
+//         std::cerr << "Gamma error: "<< x_map.segment<9>(21*t).transpose() - iDynTree::toEigen(m_desiredGamma).transpose() << std::endl;
         
         wrenchCost += 0.5*x_map.segment<12>(9 + 21*t).transpose() * wrenchWeight_map.asDiagonal() * x_map.segment<12>(9 + 21*t);
         
@@ -773,21 +776,24 @@ bool MPCIpOptSolver::eval_g(Ipopt::Index n, const Ipopt::Number* x, bool new_x, 
         if(t < m_impact){
             if(m_rightFootStep){
                 g_map.segment(constraintOffset, nConstraintsL) = Al_map*x_map.segment<6>(9 + 21*t) - bImpact_map;
-                constraintOffset += 6;
+                constraintOffset += nConstraintsL;
                 g_map.segment(constraintOffset, nConstraintsR) = Ar_map*x_map.segment<6>(9 + 21*t + 6) - b_map;
             }
             else{
                 g_map.segment(constraintOffset, nConstraintsL) = Al_map*x_map.segment<6>(9 + 21*t) - b_map;
-                constraintOffset += 6;
+                constraintOffset += nConstraintsL;
                 g_map.segment(constraintOffset, nConstraintsR) = Ar_map*x_map.segment<6>(9 + 21*t + 6) - bImpact_map;
             }
         }
         else{
             g_map.segment(constraintOffset, nConstraintsL) = Al_map*x_map.segment<6>(9 + 21*t) - bImpact_map;
-            constraintOffset += 6;
+            constraintOffset += nConstraintsL;
             g_map.segment(constraintOffset, nConstraintsR) = Ar_map*x_map.segment<6>(9 + 21*t + 6) - bImpact_map;
         }
+        //std::cerr << "Test frictionL: " << x_map.segment<2>(9 + 21*t).norm()/x_map(9 + 21*t + 2) << std::endl;
+        //std::cerr << "Test frictionR: " << x_map.segment<2>(9 + 21*t + 6).norm()/x_map(9 + 21*t + 8) << std::endl;
     }
+    //std::cerr << "Remainders constraints: " << g_map.transpose() << std::endl;
     return true;
 }
 
@@ -795,10 +801,15 @@ bool MPCIpOptSolver::eval_jac_g(Ipopt::Index n, const Ipopt::Number* x, bool new
 {
     if(values == NULL){
         int index = 0;
+        temp_iRow.resize(nele_jac);
+        temp_jCol.resize(nele_jac);
+        
         for(int block = 0; block < m_modelConstraintsJacobian.size(); ++block){
             for(iDynTree::SparseMatrix::Iterator val = m_modelConstraintsJacobian[block].blockPtr->begin(); val != m_modelConstraintsJacobian[block].blockPtr->end(); ++val){
                 iRow[index] = val->row() + m_modelConstraintsJacobian[block].rowOffset;
                 jCol[index] = val->column() + m_modelConstraintsJacobian[block].colOffset;
+                temp_iRow(index) = iRow[index];
+                temp_jCol(index) = jCol[index];
                 index++;
             }
         }
@@ -807,6 +818,8 @@ bool MPCIpOptSolver::eval_jac_g(Ipopt::Index n, const Ipopt::Number* x, bool new
             for(iDynTree::SparseMatrix::Iterator val = m_wrenchConstraintJacobian[block].blockPtr->begin(); val != m_wrenchConstraintJacobian[block].blockPtr->end(); ++val){
                 iRow[index] = val->row() + m_wrenchConstraintJacobian[block].rowOffset + rowOffset;
                 jCol[index] = val->column() + m_wrenchConstraintJacobian[block].colOffset;
+                temp_iRow(index) = iRow[index];
+                temp_jCol(index) = jCol[index];
                 index++;
             }
         }
@@ -825,8 +838,10 @@ bool MPCIpOptSolver::eval_jac_g(Ipopt::Index n, const Ipopt::Number* x, bool new
                 index++;
             }
         }
+        
+       // printIpOptMatrix("Constraints Jacobian:", nele_jac, temp_iRow, temp_jCol, values, m, n);
+        
     }
-    
     return true;
 }
 
@@ -900,7 +915,7 @@ void MPCIpOptSolver::finalize_solution(Ipopt::SolverReturn status, Ipopt::Index 
     }
 }
 
-void MPCIpOptSolver::printJacobian(std::string header, std::vector<MatrixBlock>& input, int rows, int cols)
+void MPCIpOptSolver::printJacobian(const std::string header, const std::vector<MatrixBlock>& input, int rows, int cols)
 {
     iDynTree::SparseMatrix printer;
     printer.resize(rows, cols);
@@ -915,4 +930,16 @@ void MPCIpOptSolver::printJacobian(std::string header, std::vector<MatrixBlock>&
     std::cerr << header << std::endl << printer.description(true) << std::endl;
 }
 
+void MPCIpOptSolver::printIpOptMatrix(const std::string header, Ipopt::Index nele_jac, const iDynTree::VectorDynSize& iRow, const iDynTree::VectorDynSize& jCol, Ipopt::Number* values, int rows, int cols)
+{
+    iDynTree::SparseMatrix printer;
+    printer.resize(rows, cols);
+    
+    iDynTree::Triplets filler;
+    for(int i=0; i < nele_jac; ++i){
+        filler.pushTriplet(iDynTree::Triplet(iRow(i),jCol(i),values[i]));
+    }
+    printer.setFromTriplets(filler);
+    std::cerr << header << std::endl << printer.description(true) << std::endl;
+}
 
