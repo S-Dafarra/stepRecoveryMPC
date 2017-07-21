@@ -17,6 +17,7 @@
 #include <iDynTree/Core/EigenHelpers.h>
 #include <Eigen/Core>
 #include <cmath>
+#include <ctime>
 
 StepRecoveryMPC::StepRecoveryMPC()
 :m_configured(false)
@@ -39,9 +40,10 @@ StepRecoveryMPC::StepRecoveryMPC()
     loader->Options()->SetStringValue("jac_c_constant",   "yes");
     loader->Options()->SetStringValue("jac_d_constant",   "yes");
     loader->Options()->SetStringValue("hessian_constant", "yes");
-    
+    loader->Options()->SetStringValue("print_timing_statistics", "yes");
     //loader->Options()->SetStringValue("derivative_test", "second-order");
     loader->Options()->SetIntegerValue("print_level",0);
+    //loader->Options()->SetIntegerValue("max_iter",6000);
     
 }
 
@@ -258,6 +260,10 @@ bool StepRecoveryMPC::configure(yarp::os::Searchable& mpcOptions)
         return false;
     }
 
+    if(!dryRun()){
+        std::cerr << "Initial test #2 failed." << std::endl;
+        return false;
+    }
     return true;
 }
 
@@ -272,8 +278,8 @@ bool StepRecoveryMPC::computeWrenchConstraints()
         return false;
     }
     
-    if(m_edgesPyramid <= 0){
-        std::cerr << "The number of edges of the friction pyramid should be greater than 0" <<std::endl;
+    if(m_edgesPyramid < 3){
+        std::cerr << "The number of edges of the friction pyramid should be greater than 4" <<std::endl;
         return false;
     }
     
@@ -347,6 +353,9 @@ bool StepRecoveryMPC::computeWrenchConstraints()
     iDynTree::toEigen(m_wrenchConstrMatrix).row(row) << 0, 0, -1, 0, 0, 0;
     row++;
     iDynTree::toEigen(m_wrenchConstrMatrix).row(row) << 0, 0, 1, 0, 0, 0;
+    
+    m_wrenchConstrVector(m_wrenchConstrVector.size() - 2) = 1e-6;
+    m_wrenchConstrVector(m_wrenchConstrVector.size() - 1) = 1e-6;
     
     m_afterImpactwrenchConstrVector(m_afterImpactwrenchConstrVector.size() - 2) = -m_fzMin;
     m_afterImpactwrenchConstrVector(m_afterImpactwrenchConstrVector.size() - 1) = m_fzMax;
@@ -531,8 +540,13 @@ bool StepRecoveryMPC::solve(const iDynTree::VectorDynSize& controllerData, iDynT
     
     int exitCode;
     
+    clock_t begin, end;
+    
     if(m_reOptimize){
+        std::cerr << "ReOptimizeTNLP!!" << std::endl;
+        begin = clock();
         loader->ReOptimizeTNLP(solverPointer);
+        end = clock();
         exitCode = solverPointer->getSolution(fL, fR, lastGamma);
         if(exitCode < 0){
             std::cerr << "Optimization problem failed!" << std::endl;
@@ -542,7 +556,9 @@ bool StepRecoveryMPC::solve(const iDynTree::VectorDynSize& controllerData, iDynT
         m_prevR = fR;
     }
     else{
+        begin = clock();
         loader->OptimizeTNLP(solverPointer);
+        end = clock();
         exitCode = solverPointer->getSolution(fL, fR, lastGamma);
         if(exitCode < 0){
             std::cerr << "Optimization problem failed!" << std::endl;
@@ -552,7 +568,7 @@ bool StepRecoveryMPC::solve(const iDynTree::VectorDynSize& controllerData, iDynT
         m_prevR = fR;
         m_reOptimize = true;
     }
-    
+    std::cerr << "Solved in: " << double(end - begin) / CLOCKS_PER_SEC << "sec." << std::endl;
     return true;
 }
 
@@ -562,8 +578,8 @@ int StepRecoveryMPC::dryRun()
     iDynTree::Vector4 quatL, quatR;
     pL << 0, 0, 0;
     quatL = iDynTree::Rotation::Identity().asQuaternion();
-    pR << 0.05, 0.3, 0;
-    quatR = iDynTree::Rotation::RotZ(M_PI/6).asQuaternion();
+    pR << 0.05, -0.3, 0;
+    quatR = iDynTree::Rotation::RotZ(0*M_PI/6).asQuaternion();
     
     Eigen::VectorXd gamma0(9);
     gamma0.setZero();
