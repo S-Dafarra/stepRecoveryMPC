@@ -43,6 +43,7 @@ StepRecoveryMPC::StepRecoveryMPC()
     loader->Options()->SetStringValue("print_timing_statistics", "yes");
     //loader->Options()->SetStringValue("derivative_test", "second-order");
     loader->Options()->SetIntegerValue("print_level",0);
+    
     //loader->Options()->SetIntegerValue("max_iter",6000);
 }
 
@@ -82,6 +83,10 @@ bool StepRecoveryMPC::configure(yarp::os::Searchable& mpcOptions)
     loader->Options()->SetNumericValue("acceptable_tol", mpcOptions.check("accettable_tolerance", yarp::os::Value("1e-6")).asDouble());
     
     loader->Options()->SetIntegerValue("acceptable_iter", mpcOptions.check("acceptable_iterations", yarp::os::Value("15")).asInt());
+    
+    loader->Options()->SetNumericValue("nlp_scaling_max_gradient", mpcOptions.check("nlp_scaling_max_gradient", yarp::os::Value("100")).asDouble());
+
+    loader->Options()->SetNumericValue("nlp_scaling_min_value", mpcOptions.check("nlp_scaling_min_value", yarp::os::Value("1e-8")).asDouble());
     
     m_dT = mpcOptions.check("dT", yarp::os::Value(0.01)).asDouble();
     m_horizon = mpcOptions.check("horizon", yarp::os::Value(25)).asInt();
