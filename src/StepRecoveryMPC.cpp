@@ -39,10 +39,13 @@ StepRecoveryMPC::StepRecoveryMPC()
     loader = IpoptApplicationFactory();
     loader->Options()->SetStringValue("jac_c_constant",   "yes");
     loader->Options()->SetStringValue("jac_d_constant",   "yes");
-    loader->Options()->SetStringValue("hessian_constant", "yes");
+    loader->Options()->SetStringValue("hessian_constant", "yes"); 
     loader->Options()->SetStringValue("print_timing_statistics", "yes");
     //loader->Options()->SetStringValue("derivative_test", "second-order");
+    //loader->Options()->SetStringValue(" derivative_test_print_all","yes");
     loader->Options()->SetIntegerValue("print_level",0);
+    //loader->Options()->SetStringValue("hessian_approximation", "limited-memory"); //TODO REMOVE
+    
     
     //loader->Options()->SetIntegerValue("max_iter",6000);
 }
