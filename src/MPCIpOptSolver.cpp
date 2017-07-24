@@ -551,7 +551,7 @@ bool MPCIpOptSolver::prepareProblem()
         return false;
     }
     if(!computeCostHessian()){
-        std::cerr << "Error while computing the wrench constraints jacobian." << std::endl;
+        std::cerr << "Error while computing the cost hessian." << std::endl;
         return false;
     }
     
@@ -583,7 +583,7 @@ bool MPCIpOptSolver::updateProblem()
 
 int MPCIpOptSolver::getSolution(iDynTree::VectorDynSize& fL, iDynTree::VectorDynSize& fR, iDynTree::VectorDynSize& lastGamma)
 {
-    if(m_previousSolution.size() > 21){
+    if(m_previousSolution.size() >= 21){
         Eigen::Map<Eigen::VectorXd> solution_map(m_previousSolution.data(),m_previousSolution.size());
         fL.resize(6);
         fR.resize(6);
