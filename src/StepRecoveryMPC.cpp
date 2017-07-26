@@ -44,6 +44,11 @@ StepRecoveryMPC::StepRecoveryMPC()
     //loader->Options()->SetStringValue("derivative_test", "second-order");
     loader->Options()->SetIntegerValue("print_level",0);
     
+   // loader->Options()->SetNumericValue("bound_push", 1e-16);
+   // loader->Options()->SetNumericValue("bound_frac", 1e-16);
+    
+    //loader->Options()->SetStringValue("bound_mult_init_method", "mu-based");
+    
     //loader->Options()->SetIntegerValue("max_iter",6000);
 }
 
@@ -80,13 +85,13 @@ bool StepRecoveryMPC::configure(yarp::os::Searchable& mpcOptions)
     std::string solvername = mpcOptions.check("solver_name", yarp::os::Value("mumps")).asString();
     loader->Options()->SetStringValue("linear_solver", solvername);
     
-    loader->Options()->SetNumericValue("acceptable_tol", mpcOptions.check("accettable_tolerance", yarp::os::Value("1e-6")).asDouble());
+    loader->Options()->SetNumericValue("acceptable_tol", mpcOptions.check("accettable_tolerance", yarp::os::Value(1e-6)).asDouble());
     
-    loader->Options()->SetIntegerValue("acceptable_iter", mpcOptions.check("acceptable_iterations", yarp::os::Value("15")).asInt());
+    loader->Options()->SetIntegerValue("acceptable_iter", mpcOptions.check("acceptable_iterations", yarp::os::Value(15)).asInt());
     
-    loader->Options()->SetNumericValue("nlp_scaling_max_gradient", mpcOptions.check("nlp_scaling_max_gradient", yarp::os::Value("100")).asDouble());
+    loader->Options()->SetNumericValue("nlp_scaling_max_gradient", mpcOptions.check("nlp_scaling_max_gradient", yarp::os::Value(100.0)).asDouble());
 
-    loader->Options()->SetNumericValue("nlp_scaling_min_value", mpcOptions.check("nlp_scaling_min_value", yarp::os::Value("1e-8")).asDouble());
+    loader->Options()->SetNumericValue("nlp_scaling_min_value", mpcOptions.check("nlp_scaling_min_value", yarp::os::Value(1e-8)).asDouble());
     
     m_dT = mpcOptions.check("dT", yarp::os::Value(0.01)).asDouble();
     m_horizon = mpcOptions.check("horizon", yarp::os::Value(25)).asInt();
@@ -273,6 +278,11 @@ bool StepRecoveryMPC::configure(yarp::os::Searchable& mpcOptions)
 
     if(!dryRun()){
         std::cerr << "Initial test #2 failed." << std::endl;
+        return false;
+    }
+    
+    if(!dryRun()){
+        std::cerr << "Initial test #3 failed." << std::endl;
         return false;
     }
     return true;

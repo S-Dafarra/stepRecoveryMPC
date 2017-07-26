@@ -660,9 +660,10 @@ bool MPCIpOptSolver::get_starting_point(Ipopt::Index n, bool init_x, Ipopt::Numb
         Eigen::Map<Eigen::VectorXd> bias_map(m_bias.data(), 9);
         Eigen::Map<Eigen::VectorXd> gamma0_map (m_gamma0.data(), m_gamma0.size());
         
-        x_map.head((m_horizon-1)*21) = prevSol_map.tail((m_horizon-1)*21);
-        x_map.segment<9>((m_horizon-1)*21) = ev_map*prevSol_map.segment<9>((m_horizon-1)*21) + f_map*prevSol_map.tail<12>() + bias_map;
-        x_map.tail<12>() = prevSol_map.tail<12>();
+        x_map = prevSol_map;
+//         x_map.head((m_horizon-1)*21) = prevSol_map.tail((m_horizon-1)*21);
+//         x_map.segment<9>((m_horizon-1)*21) = ev_map*prevSol_map.segment<9>((m_horizon-1)*21) + f_map*prevSol_map.tail<12>() + bias_map;
+//         x_map.tail<12>() = prevSol_map.tail<12>();
         
         
 //         x_map.setZero();
