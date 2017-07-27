@@ -44,8 +44,14 @@ StepRecoveryMPC::StepRecoveryMPC()
     //loader->Options()->SetStringValue("derivative_test", "second-order");
     loader->Options()->SetIntegerValue("print_level",0);
     
-   // loader->Options()->SetNumericValue("bound_push", 1e-16);
-   // loader->Options()->SetNumericValue("bound_frac", 1e-16);
+    loader->Options()->SetStringValue("mehrotra_algorithm", "yes");
+   //loader->Options()->SetStringValue("mu_strategy", "monotone");
+    
+    loader->Options()->SetNumericValue("bound_push", 1e-10);
+    loader->Options()->SetNumericValue("bound_frac", 1e-10);
+    
+    loader->Options()->SetNumericValue("warm_start_bound_push", 1e-10);
+    loader->Options()->SetNumericValue("warm_start_bound_frac", 1e-10);
     
     //loader->Options()->SetStringValue("bound_mult_init_method", "mu-based");
     
@@ -614,7 +620,7 @@ int StepRecoveryMPC::dryRun()
     gamma0.setZero();
     gamma0(2) = 0.5;
     
-    double k_impact = 12;
+    double k_impact = 2;
     
     double comZDes = 0.5;
     
