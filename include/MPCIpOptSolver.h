@@ -70,6 +70,10 @@ class MPCIpOptSolver : public Ipopt::TNLP {
     iDynTree::SparseMatrix m_costHessian, m_gammaWeightHessian, m_gammaWeightImpactHessian, m_wrenchWeightHessian, m_derivativeWrenchWeightHessian, m_negativeDerWrenchHessian;
     
     iDynTree::VectorDynSize m_previousSolution;
+    iDynTree::VectorDynSize m_lowerBoundMultipliers, m_upperBoundMultipliers;
+    iDynTree::VectorDynSize m_contraintMultipliers;
+
+
     int m_exitCode;
     
     bool computeModelMatrices();
@@ -157,6 +161,8 @@ public:
                            const Ipopt::Number* lambda, Ipopt::Number obj_value,
                            const Ipopt::IpoptData* ip_data,
                            Ipopt::IpoptCalculatedQuantities* ip_cq);
+
+    virtual bool get_warm_start_iterate(Ipopt::IteratesVector& warm_start_iterate);
 
 };
 #endif

@@ -554,6 +554,18 @@ bool MPCIpOptSolver::prepareProblem()
         std::cerr << "Error while computing the cost hessian." << std::endl;
         return false;
     }
+
+    // initialize buffers for multipliers
+    size_t n = 21*m_horizon;
+    size_t m = (9+m_wrenchAl.rows()+m_wrenchAr.rows())*m_horizon;
+    m_lowerBoundMultipliers.resize(n);
+    m_lowerBoundMultipliers.zero();
+    m_upperBoundMultipliers.resize(n);
+    m_upperBoundMultipliers.zero();
+    m_contraintMultipliers.resize(m);
+    m_contraintMultipliers.zero();
+    m_previousSolution.resize(n);
+    m_previousSolution.zero();
     
     return true;
 }
@@ -616,7 +628,6 @@ bool MPCIpOptSolver::get_nlp_info(Ipopt::Index& n, Ipopt::Index& m, Ipopt::Index
     nnz_h_lag = m_costHessian.numberOfNonZeros();
     
     index_style = Ipopt::TNLP::C_STYLE;
-    
     return true;
 }
 
@@ -643,24 +654,28 @@ bool MPCIpOptSolver::get_bounds_info(Ipopt::Index n, Ipopt::Number* x_l, Ipopt::
 
 bool MPCIpOptSolver::get_starting_point(Ipopt::Index n, bool init_x, Ipopt::Number* x, bool init_z, Ipopt::Number* z_L, Ipopt::Number* z_U, Ipopt::Index m, bool init_lambda, Ipopt::Number* lambda)
 {
-    if(init_z) return false;
-    if(init_lambda) return false;
+    if (init_z) {
+        Eigen::Map<Eigen::VectorXd> zlMap(z_L, n);
+        Eigen::Map<Eigen::VectorXd> zuMap(z_U, n);
+        zlMap = iDynTree::toEigen(m_lowerBoundMultipliers);
+        zuMap = iDynTree::toEigen(m_upperBoundMultipliers);
+    }
+    if (init_lambda)
+    {
+        Eigen::Map<Eigen::VectorXd> lambdaMap(lambda, m);
+        lambdaMap = iDynTree::toEigen(m_contraintMultipliers);
+    }
     
     if(init_x){
         Eigen::Map<Eigen::VectorXd> x_map(x, n);
-        
-        if(m_previousSolution.size()!=n){
-            x_map.setZero();
-            return true;
-        }
-        
-        Eigen::Map<Eigen::VectorXd> prevSol_map(m_previousSolution.data(), n);
-        iDynTree::iDynTreeEigenMatrixMap ev_map = iDynTree::toEigen(m_EvGamma);
-        iDynTree::iDynTreeEigenMatrixMap f_map = iDynTree::toEigen(m_FGamma);
-        Eigen::Map<Eigen::VectorXd> bias_map(m_bias.data(), 9);
-        Eigen::Map<Eigen::VectorXd> gamma0_map (m_gamma0.data(), m_gamma0.size());
-        
-        x_map = prevSol_map;
+        x_map = iDynTree::toEigen(m_previousSolution);
+
+
+//        iDynTree::iDynTreeEigenMatrixMap ev_map = iDynTree::toEigen(m_EvGamma);
+//        iDynTree::iDynTreeEigenMatrixMap f_map = iDynTree::toEigen(m_FGamma);
+//        Eigen::Map<Eigen::VectorXd> bias_map(m_bias.data(), 9);
+//        Eigen::Map<Eigen::VectorXd> gamma0_map (m_gamma0.data(), m_gamma0.size());
+
 //         x_map.head((m_horizon-1)*21) = prevSol_map.tail((m_horizon-1)*21);
 //         x_map.segment<9>((m_horizon-1)*21) = ev_map*prevSol_map.segment<9>((m_horizon-1)*21) + f_map*prevSol_map.tail<12>() + bias_map;
 //         x_map.tail<12>() = prevSol_map.tail<12>();
@@ -679,12 +694,19 @@ bool MPCIpOptSolver::get_starting_point(Ipopt::Index n, bool init_x, Ipopt::Numb
 //                 x_map.segment<9>(21*t) = ev_map*x_map.segment<9>(21*(t-1)) + f_map*x_map.segment<12>(9 + 21*t) + bias_map;
 //             }
 //         }
-        
-        
-        
-        return true;
     }
-    return false;
+//    std::cerr << "Init-------\n";
+//
+//    Eigen::Map<Eigen::VectorXd> zlMap(z_L, n);
+//    std::cerr << zlMap.transpose() << std::endl<< std::endl;
+//    Eigen::Map<Eigen::VectorXd> zuMap(z_U, n);
+//    std::cerr << zuMap.transpose() << std::endl<< std::endl;
+//    Eigen::Map<Eigen::VectorXd> lambdaMap(lambda, m);
+//    std::cerr << lambdaMap.transpose() << std::endl<< std::endl;
+//    Eigen::Map<Eigen::VectorXd> x_map(x, n);
+//    std::cerr << x_map.transpose() << std::endl<< std::endl;
+
+    return true;
 }
 
 bool MPCIpOptSolver::eval_f(Ipopt::Index n, const Ipopt::Number* x, bool new_x, Ipopt::Number& obj_value)
@@ -892,8 +914,22 @@ void MPCIpOptSolver::finalize_solution(Ipopt::SolverReturn status, Ipopt::Index 
 
         m_previousSolution.resize(n);
         iDynTree::toEigen(m_previousSolution) = x_map;
-        
-        
+
+        Eigen::Map<const Eigen::VectorXd> zlMap(z_L, n);
+        Eigen::Map<const Eigen::VectorXd> zuMap(z_U, n);
+        iDynTree::toEigen(m_lowerBoundMultipliers) = zlMap;
+        iDynTree::toEigen(m_upperBoundMultipliers) = zuMap;
+
+        Eigen::Map<const Eigen::VectorXd> lambdaMap(lambda, m);
+        iDynTree::toEigen(m_contraintMultipliers) = lambdaMap;
+
+
+//        std::cerr << "Final solution" << std::endl;
+//        std::cerr << zlMap.transpose() << std::endl<< std::endl;
+//        std::cerr << zuMap.transpose() << std::endl<< std::endl;
+//        std::cerr << lambdaMap.transpose() << std::endl<< std::endl;
+//        std::cerr << x_map.transpose() << std::endl<< std::endl;
+
         if(status == Ipopt::SUCCESS){
             m_exitCode = 0;
         }
@@ -932,6 +968,12 @@ void MPCIpOptSolver::finalize_solution(Ipopt::SolverReturn status, Ipopt::Index 
                 
         }
     }
+}
+
+bool MPCIpOptSolver::get_warm_start_iterate(Ipopt::IteratesVector& warm_start_iterate)
+{
+    std::cerr << "Hello inside warm start\n";
+    return true;
 }
 
 void MPCIpOptSolver::printJacobian(const std::string header, const std::vector<MatrixBlock>& input, int rows, int cols)

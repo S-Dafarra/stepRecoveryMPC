@@ -40,7 +40,7 @@ StepRecoveryMPC::StepRecoveryMPC()
     loader->Options()->SetStringValue("jac_c_constant",   "yes");
     loader->Options()->SetStringValue("jac_d_constant",   "yes");
     loader->Options()->SetStringValue("hessian_constant", "yes");
-    loader->Options()->SetStringValue("print_timing_statistics", "yes");
+//    loader->Options()->SetStringValue("print_timing_statistics", "yes");
     //loader->Options()->SetStringValue("derivative_test", "second-order");
     loader->Options()->SetIntegerValue("print_level",0);
     
@@ -86,9 +86,8 @@ bool StepRecoveryMPC::configure(yarp::os::Searchable& mpcOptions)
     loader->Options()->SetStringValue("linear_solver", solvername);
     
     loader->Options()->SetNumericValue("acceptable_tol", mpcOptions.check("accettable_tolerance", yarp::os::Value(1e-6)).asDouble());
-    
     loader->Options()->SetIntegerValue("acceptable_iter", mpcOptions.check("acceptable_iterations", yarp::os::Value(15)).asInt());
-    
+
     loader->Options()->SetNumericValue("nlp_scaling_max_gradient", mpcOptions.check("nlp_scaling_max_gradient", yarp::os::Value(100.0)).asDouble());
 
     loader->Options()->SetNumericValue("nlp_scaling_min_value", mpcOptions.check("nlp_scaling_min_value", yarp::os::Value(1e-8)).asDouble());
@@ -562,21 +561,30 @@ bool StepRecoveryMPC::solve(const iDynTree::VectorDynSize& controllerData, iDynT
     int exitCode;
     
     clock_t begin, end;
-    
+
     if(m_reOptimize){
-        //std::cerr << "ReOptimizeTNLP!!" << std::endl;
-        begin = clock();
-        loader->ReOptimizeTNLP(solverPointer);
-        end = clock();
-        exitCode = solverPointer->getSolution(fL, fR, lastGamma);
-        if(exitCode < 0){
-            std::cerr << "Optimization problem failed!" << std::endl;
-            return false;
-        }
-        m_prevL = fL;
-        m_prevR = fR;
+        loader->Options()->SetStringValue("warm_start_init_point", "yes");
+        loader->Options()->SetNumericValue("warm_start_bound_frac", 1e-6);
+        loader->Options()->SetNumericValue("warm_start_bound_push", 1e-6);
+        loader->Options()->SetNumericValue("warm_start_mult_bound_push", 1e-6);
+        loader->Options()->SetNumericValue("warm_start_slack_bound_frac", 1e-6);
+        loader->Options()->SetNumericValue("warm_start_slack_bound_push", 1e-6);
     }
-    else{
+
+//    if(m_reOptimize){
+//        //std::cerr << "ReOptimizeTNLP!!" << std::endl;
+//        begin = clock();
+//        loader->ReOptimizeTNLP(solverPointer);
+//        end = clock();
+//        exitCode = solverPointer->getSolution(fL, fR, lastGamma);
+//        if(exitCode < 0){
+//            std::cerr << "Optimization problem failed!" << std::endl;
+//            return false;
+//        }
+//        m_prevL = fL;
+//        m_prevR = fR;
+//    }
+//    else{
         begin = clock();
         loader->OptimizeTNLP(solverPointer);
         end = clock();
@@ -588,7 +596,7 @@ bool StepRecoveryMPC::solve(const iDynTree::VectorDynSize& controllerData, iDynT
         m_prevL = fL;
         m_prevR = fR;
         m_reOptimize = true;
-    }
+//    }
     std::cerr << "Solved in: " << double(end - begin) / CLOCKS_PER_SEC << "sec." << std::endl;
     return true;
 }
