@@ -90,31 +90,31 @@ bool StepRecoveryCoordinator::configure(yarp::os::ResourceFinder& rf)
 
 bool StepRecoveryCoordinator::updateModule()
 {
-    yarp::sig::Vector *inputData = controllerPort.read(true);
+    yarp::sig::Vector *inputData = controllerPort.read(false); //TODO Better handling of reading
     
-    if(inputData == NULL)
-        return false;
+    if(inputData != NULL){
 
-    if(!iDynTree::toiDynTree(*inputData, inputBuffer)){
-        std::cerr << "Wrong dimension on the input data" << std::endl;
-        return false;
+        if(!iDynTree::toiDynTree(*inputData, inputBuffer)){
+            std::cerr << "Wrong dimension on the input data" << std::endl;
+            return false;
+        }
+        
+        bool solved = controllerMPC.solve(inputBuffer, fL, fR, lastGamma);
+        
+        yarp::sig::Vector& outputBuffer = outputPort.prepare();
+        outputBuffer.resize(21);
+        
+        if(!solved){
+            std::cerr << "Failed to find a solution" << std::endl;
+            iDynTree::toEigen(outputBuffer) << iDynTree::toEigen(fL_prev), iDynTree::toEigen(fR_prev), iDynTree::toEigen(lastGamma);
+        }
+        else{
+            iDynTree::toEigen(outputBuffer) << iDynTree::toEigen(fL), iDynTree::toEigen(fR), iDynTree::toEigen(lastGamma);
+            fL_prev = fL;
+            fR_prev = fR;
+        }
+        outputPort.write();
     }
-    
-    bool solved = controllerMPC.solve(inputBuffer, fL, fR, lastGamma);
-    
-    yarp::sig::Vector& outputBuffer = outputPort.prepare();
-    outputBuffer.resize(21);
-    
-    if(!solved){
-        std::cerr << "Failed to find a solution" << std::endl;
-        iDynTree::toEigen(outputBuffer) << iDynTree::toEigen(fL_prev), iDynTree::toEigen(fR_prev), iDynTree::toEigen(lastGamma);
-    }
-    else{
-        iDynTree::toEigen(outputBuffer) << iDynTree::toEigen(fL), iDynTree::toEigen(fR), iDynTree::toEigen(lastGamma);
-        fL_prev = fL;
-        fR_prev = fR;
-    }
-    outputPort.write();
     
     return true;
 }
