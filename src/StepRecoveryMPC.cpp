@@ -55,7 +55,10 @@ StepRecoveryMPC::StepRecoveryMPC()
     
     //loader->Options()->SetStringValue("bound_mult_init_method", "mu-based");
     
-    loader->Options()->SetNumericValue("bound_relax_factor", 1e-6);
+    //loader->Options()->SetNumericValue("bound_relax_factor", 1e-6);
+    loader->Options()->SetStringValue("fast_step_computation", "yes");
+    loader->Options()->SetStringValue("least_square_init_primal", "yes");
+    loader->Options()->SetStringValue("least_square_init_duals", "yes");
     
     //loader->Options()->SetIntegerValue("max_iter",6000);
 }
@@ -568,34 +571,29 @@ bool StepRecoveryMPC::solve(const iDynTree::VectorDynSize& controllerData, iDynT
     
     int exitCode;
     
-    clock_t begin, end;
-
     if(m_reOptimize){
         loader->Options()->SetStringValue("warm_start_init_point", "yes");
+        loader->Options()->SetStringValue("warm_start_same_structure", "yes");
         loader->Options()->SetNumericValue("warm_start_bound_frac", 1e-6);
         loader->Options()->SetNumericValue("warm_start_bound_push", 1e-6);
         loader->Options()->SetNumericValue("warm_start_mult_bound_push", 1e-6);
         loader->Options()->SetNumericValue("warm_start_slack_bound_frac", 1e-6);
         loader->Options()->SetNumericValue("warm_start_slack_bound_push", 1e-6);
-    }
+//    }
 
 //    if(m_reOptimize){
-//        //std::cerr << "ReOptimizeTNLP!!" << std::endl;
-//        begin = clock();
-//        loader->ReOptimizeTNLP(solverPointer);
-//        end = clock();
-//        exitCode = solverPointer->getSolution(fL, fR, lastGamma);
-//        if(exitCode < 0){
-//            std::cerr << "Optimization problem failed!" << std::endl;
-//            return false;
-//        }
-//        m_prevL = fL;
-//        m_prevR = fR;
-//    }
-//    else{
-        begin = clock();
+       //std::cerr << "ReOptimizeTNLP!!" << std::endl;
+       loader->ReOptimizeTNLP(solverPointer);
+       exitCode = solverPointer->getSolution(fL, fR, lastGamma);
+       if(exitCode < 0){
+           std::cerr << "Optimization problem failed!" << std::endl;
+           return false;
+       }
+       m_prevL = fL;
+       m_prevR = fR;
+   }
+   else{
         loader->OptimizeTNLP(solverPointer);
-        end = clock();
         exitCode = solverPointer->getSolution(fL, fR, lastGamma);
         if(exitCode < 0){
             std::cerr << "Optimization problem failed!" << std::endl;
@@ -604,8 +602,7 @@ bool StepRecoveryMPC::solve(const iDynTree::VectorDynSize& controllerData, iDynT
         m_prevL = fL;
         m_prevR = fR;
         m_reOptimize = true;
-//    }
-    std::cerr << "Solved in: " << double(end - begin) / CLOCKS_PER_SEC << "sec." << std::endl;
+    }
     return true;
 }
 
@@ -639,7 +636,13 @@ int StepRecoveryMPC::dryRun()
     m_prevR(2) = 150;
     
     iDynTree::VectorDynSize dummyVector;
-    return solve(dummyController, m_prevL, m_prevR, dummyVector);
+    
+    clock_t begin, end;
+    begin = clock();
+    bool ok = solve(dummyController, m_prevL, m_prevR, dummyVector);
+    end = clock();
+    std::cerr << "Solved in: " << double(end - begin) / CLOCKS_PER_SEC*1000 << "msec." << std::endl;
+    return ok;
 }
 
 

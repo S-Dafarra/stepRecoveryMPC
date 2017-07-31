@@ -187,7 +187,7 @@ bool MPCIpOptSolver::setDesiredCOMPosition(const iDynTree::Position& desiredCOM)
     Eigen::Map<const Eigen::VectorXd> desiredCOM_map(desiredCOM.data(), 3);
     iDynTree::toEigen(m_desiredGamma).head<3>() = desiredCOM_map;
     
-    std::cerr << "desiredGamma: "<< m_desiredGamma.toString() << std::endl;
+    //std::cerr << "desiredGamma: "<< m_desiredGamma.toString() << std::endl;
     
     return true;
 }
