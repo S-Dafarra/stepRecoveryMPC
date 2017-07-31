@@ -633,9 +633,15 @@ bool MPCIpOptSolver::get_nlp_info(Ipopt::Index& n, Ipopt::Index& m, Ipopt::Index
 
 bool MPCIpOptSolver::get_bounds_info(Ipopt::Index n, Ipopt::Number* x_l, Ipopt::Number* x_u, Ipopt::Index m, Ipopt::Number* g_l, Ipopt::Number* g_u)
 {
-    for (Ipopt::Index i = 0; i < n; ++i) {
-        x_l[i] = -2e+19;
-        x_u[i] =  2e+19;
+    Eigen::Map<Eigen::VectorXd> x_l_map(x_l,n);
+    Eigen::Map<Eigen::VectorXd> x_u_map(x_u,n);
+    
+    x_l_map.setConstant(-2e+19);
+    x_u_map.setConstant( 2e+19);
+    
+    for(int t = 0; t < std::min(m_horizon,m_impact); ++t){
+        x_l_map.segment<6>(21*t + 9 + 6).setZero(); //assuming right foot impact
+        x_u_map.segment<6>(21*t + 9 + 6).setZero();
     }
     
     for (Ipopt::Index c = 0; c < m; ++c) {

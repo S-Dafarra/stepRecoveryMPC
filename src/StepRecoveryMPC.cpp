@@ -55,6 +55,8 @@ StepRecoveryMPC::StepRecoveryMPC()
     
     //loader->Options()->SetStringValue("bound_mult_init_method", "mu-based");
     
+    loader->Options()->SetNumericValue("bound_relax_factor", 1e-6);
+    
     //loader->Options()->SetIntegerValue("max_iter",6000);
 }
 
@@ -631,6 +633,8 @@ int StepRecoveryMPC::dryRun()
     iDynTree::VectorDynSize dummyController;
     dummyController.resize(27);
     iDynTree::toEigen(dummyController) << pL, iDynTree::toEigen(quatL), pR, iDynTree::toEigen(quatR), gamma0, k_impact, comZDes, mass, state;
+    m_prevL.zero();
+    m_prevR.zero();
     m_prevL(2) = 150;
     m_prevR(2) = 150;
     
