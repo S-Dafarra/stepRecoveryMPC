@@ -26,6 +26,8 @@ class StepRecoveryCoordinator : public yarp::os::RFModule {
     yarp::os::BufferedPort< yarp::sig::Vector > outputPort;
     StepRecoveryMPC controllerMPC;
     
+    double m_period;
+    
     iDynTree::VectorDynSize inputBuffer, fL, fL_prev, fR, fR_prev, lastGamma;
     
 public:

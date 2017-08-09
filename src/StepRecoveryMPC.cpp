@@ -55,11 +55,12 @@ StepRecoveryMPC::StepRecoveryMPC()
     
     //loader->Options()->SetStringValue("bound_mult_init_method", "mu-based");
     
-    //loader->Options()->SetNumericValue("bound_relax_factor", 1e-6);
+    loader->Options()->SetNumericValue("bound_relax_factor", 1e-6);
     loader->Options()->SetStringValue("fast_step_computation", "yes");
-    loader->Options()->SetStringValue("least_square_init_primal", "yes");
-    loader->Options()->SetStringValue("least_square_init_duals", "yes");
-    
+    //loader->Options()->SetStringValue("least_square_init_primal", "yes");
+    //loader->Options()->SetStringValue("least_square_init_duals", "yes");
+    loader->Options()->SetStringValue("alpha_for_y", "dual-and-full");
+    //loader->Options()->SetNumericValue("alpha_for_y_tol", 1e-1);
     //loader->Options()->SetIntegerValue("max_iter",6000);
 }
 

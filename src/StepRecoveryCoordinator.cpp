@@ -66,6 +66,8 @@ bool StepRecoveryCoordinator::configure(yarp::os::ResourceFinder& rf)
     std::string robot = rf.check("robot", yarp::os::Value("icubSim")).asString();
     int verbosityLevel = rf.check("solver_verbosity", yarp::os::Value(0)).asInt();
     
+    m_period = rf.check("controller_period", yarp::os::Value(0.01)).asDouble();
+    
     controllerMPC.setVerbosity(verbosityLevel);
     
     yarp::os::Bottle &MPCSection = rf.findGroup("MPC");
@@ -121,7 +123,7 @@ bool StepRecoveryCoordinator::updateModule()
 
 double StepRecoveryCoordinator::getPeriod()
 {
-    return 10.0;
+    return m_period;
 }
 
 bool StepRecoveryCoordinator::close()
