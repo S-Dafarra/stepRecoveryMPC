@@ -28,7 +28,7 @@ class StepRecoveryCoordinator : public yarp::os::RFModule {
     
     double m_period;
     
-    iDynTree::VectorDynSize inputBuffer, fL, fL_prev, fR, fR_prev, lastGamma;
+    iDynTree::VectorDynSize inputBuffer, fL, fL_prev, fR, fR_prev, newGamma, lastGamma;
     
 public:
     StepRecoveryCoordinator();

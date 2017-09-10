@@ -60,6 +60,8 @@ StepRecoveryMPC::StepRecoveryMPC()
     //loader->Options()->SetStringValue("least_square_init_primal", "yes");
     //loader->Options()->SetStringValue("least_square_init_duals", "yes");
     loader->Options()->SetStringValue("alpha_for_y", "dual-and-full");
+    loader->Options()->SetIntegerValue("max_iter", 300);
+
     //loader->Options()->SetNumericValue("alpha_for_y_tol", 1e-1);
     //loader->Options()->SetIntegerValue("max_iter",6000);
 }
@@ -528,7 +530,7 @@ bool StepRecoveryMPC::setPreviousWrench()
 }
 
 
-bool StepRecoveryMPC::solve(const iDynTree::VectorDynSize& controllerData, iDynTree::VectorDynSize& fL, iDynTree::VectorDynSize& fR, iDynTree::VectorDynSize& lastGamma)
+bool StepRecoveryMPC::solve(const iDynTree::VectorDynSize& controllerData, iDynTree::VectorDynSize& fL, iDynTree::VectorDynSize& fR, iDynTree::VectorDynSize& newGamma, iDynTree::VectorDynSize& lastGamma)
 {
     if(!m_configured){
         std::cerr <<"First you have to call the configure method." << std::endl;
@@ -585,7 +587,7 @@ bool StepRecoveryMPC::solve(const iDynTree::VectorDynSize& controllerData, iDynT
 //    if(m_reOptimize){
        //std::cerr << "ReOptimizeTNLP!!" << std::endl;
        loader->ReOptimizeTNLP(solverPointer);
-       exitCode = solverPointer->getSolution(fL, fR, lastGamma);
+       exitCode = solverPointer->getSolution(fL, fR, newGamma, lastGamma);
        if(exitCode < 0){
            std::cerr << "Optimization problem failed!" << std::endl;
            return false;
@@ -595,7 +597,7 @@ bool StepRecoveryMPC::solve(const iDynTree::VectorDynSize& controllerData, iDynT
    }
    else{
         loader->OptimizeTNLP(solverPointer);
-        exitCode = solverPointer->getSolution(fL, fR, lastGamma);
+        exitCode = solverPointer->getSolution(fL, fR, newGamma, lastGamma);
         if(exitCode < 0){
             std::cerr << "Optimization problem failed!" << std::endl;
             return false;
@@ -636,11 +638,11 @@ int StepRecoveryMPC::dryRun()
     m_prevL(2) = 150;
     m_prevR(2) = 150;
     
-    iDynTree::VectorDynSize dummyVector;
+    iDynTree::VectorDynSize lastCoM, newCom;
     
     clock_t begin, end;
     begin = clock();
-    bool ok = solve(dummyController, m_prevL, m_prevR, dummyVector);
+    bool ok = solve(dummyController, m_prevL, m_prevR, newCom, lastCoM);
     end = clock();
     std::cerr << "Solved in: " << double(end - begin) / CLOCKS_PER_SEC*1000 << "msec." << std::endl;
     return ok;

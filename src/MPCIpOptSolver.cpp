@@ -39,18 +39,18 @@ MPCIpOptSolver::MPCIpOptSolver()
     m_derivativeWrenchWeight.zero();
     m_EvGamma.resize(9,9);
     m_EvGamma.zero();
-    m_EvGammaSparsePtr = std::make_shared<iDynTree::SparseMatrix>();
+    m_EvGammaSparsePtr = std::make_shared<iDynTree::SparseMatrix<iDynTree::RowMajor>>();
     m_EvGammaSparsePtr->resize(9,9);
     m_FGamma.resize(9,12);
     m_FGamma.zero();
-    m_FGammaSparsePtr = std::make_shared<iDynTree::SparseMatrix>();
+    m_FGammaSparsePtr = std::make_shared<iDynTree::SparseMatrix<iDynTree::RowMajor>>();
     m_FGammaSparsePtr->resize(9,12);
     m_skewBuffer.resize(3,3);
     m_bias.zero();
-    m_minusIdentityPtr = std::make_shared<iDynTree::SparseMatrix>();
+    m_minusIdentityPtr = std::make_shared<iDynTree::SparseMatrix<iDynTree::RowMajor>>();
     m_minusIdentityPtr->resize(9,9);
-    m_wrenchAlSparsePtr = std::make_shared<iDynTree::SparseMatrix>();
-    m_wrenchArSparsePtr = std::make_shared<iDynTree::SparseMatrix>();
+    m_wrenchAlSparsePtr = std::make_shared<iDynTree::SparseMatrix<iDynTree::RowMajor>>();
+    m_wrenchArSparsePtr = std::make_shared<iDynTree::SparseMatrix<iDynTree::RowMajor>>();
     iDynTree::Triplets values;
     values.addDiagonalMatrix(0,0,-1,9);
     m_minusIdentityPtr->setFromTriplets(values);
@@ -593,15 +593,18 @@ bool MPCIpOptSolver::updateProblem()
     return true;
 }
 
-int MPCIpOptSolver::getSolution(iDynTree::VectorDynSize& fL, iDynTree::VectorDynSize& fR, iDynTree::VectorDynSize& lastGamma)
+int MPCIpOptSolver::getSolution(iDynTree::VectorDynSize& fL, iDynTree::VectorDynSize& fR, iDynTree::VectorDynSize& newGamma,
+                                 iDynTree::VectorDynSize& lastGamma)
 {
     if(m_previousSolution.size() >= 21){
         Eigen::Map<Eigen::VectorXd> solution_map(m_previousSolution.data(),m_previousSolution.size());
         fL.resize(6);
         fR.resize(6);
+        newGamma.resize(9);
         lastGamma.resize(9);
         iDynTree::toEigen(fL) = solution_map.segment<6>(9);
         iDynTree::toEigen(fR) = solution_map.segment<6>(9+6);
+        iDynTree::toEigen(newGamma) = solution_map.head<9>();
         iDynTree::toEigen(lastGamma) = solution_map.segment<9>(21*(m_horizon-1));
     }
     
@@ -639,15 +642,15 @@ bool MPCIpOptSolver::get_bounds_info(Ipopt::Index n, Ipopt::Number* x_l, Ipopt::
     x_l_map.setConstant(-2e+19);
     x_u_map.setConstant( 2e+19);
     
-    for(int t = 0; t < std::min(m_horizon,m_impact); ++t){
-        x_l_map.segment<6>(21*t + 9 + 6).setZero(); //assuming right foot impact
-        x_u_map.segment<6>(21*t + 9 + 6).setZero();
-    }
+//    for(int t = 0; t < std::min(m_horizon,m_impact); ++t){
+//        x_l_map.segment<6>(21*t + 9 + 6).setZero(); //assuming right foot impact
+//        x_u_map.segment<6>(21*t + 9 + 6).setZero();
+//    }
     
     for (Ipopt::Index c = 0; c < m; ++c) {
         if(c < (9*m_horizon)){
-            g_l[c] = -1e-9*0;  //State constraints are equality
-            g_u[c] = 1e-9*0;
+            g_l[c] = 0;  //State constraints are equality
+            g_u[c] = 0;
         }
         else{
             g_l[c] = -2e+19;
@@ -852,7 +855,7 @@ bool MPCIpOptSolver::eval_jac_g(Ipopt::Index n, const Ipopt::Number* x, bool new
         temp_jCol.resize(nele_jac);
         
         for(int block = 0; block < m_modelConstraintsJacobian.size(); ++block){
-            for(iDynTree::SparseMatrix::Iterator val = m_modelConstraintsJacobian[block].blockPtr->begin(); val != m_modelConstraintsJacobian[block].blockPtr->end(); ++val){
+            for(iDynTree::SparseMatrix<iDynTree::RowMajor>::Iterator val = m_modelConstraintsJacobian[block].blockPtr->begin(); val != m_modelConstraintsJacobian[block].blockPtr->end(); ++val){
                 iRow[index] = val->row() + m_modelConstraintsJacobian[block].rowOffset;
                 jCol[index] = val->column() + m_modelConstraintsJacobian[block].colOffset;
                 temp_iRow(index) = iRow[index];
@@ -862,7 +865,7 @@ bool MPCIpOptSolver::eval_jac_g(Ipopt::Index n, const Ipopt::Number* x, bool new
         }
         int rowOffset = m_horizon*9;
         for(int block=0; block < m_wrenchConstraintJacobian.size(); ++block){
-            for(iDynTree::SparseMatrix::Iterator val = m_wrenchConstraintJacobian[block].blockPtr->begin(); val != m_wrenchConstraintJacobian[block].blockPtr->end(); ++val){
+            for(iDynTree::SparseMatrix<iDynTree::RowMajor>::Iterator val = m_wrenchConstraintJacobian[block].blockPtr->begin(); val != m_wrenchConstraintJacobian[block].blockPtr->end(); ++val){
                 iRow[index] = val->row() + m_wrenchConstraintJacobian[block].rowOffset + rowOffset;
                 jCol[index] = val->column() + m_wrenchConstraintJacobian[block].colOffset;
                 temp_iRow(index) = iRow[index];
@@ -874,13 +877,13 @@ bool MPCIpOptSolver::eval_jac_g(Ipopt::Index n, const Ipopt::Number* x, bool new
     else{
         int index = 0;
         for(int block = 0; block < m_modelConstraintsJacobian.size(); ++block){
-            for(iDynTree::SparseMatrix::Iterator val = m_modelConstraintsJacobian[block].blockPtr->begin(); val != m_modelConstraintsJacobian[block].blockPtr->end(); ++val){
+            for(iDynTree::SparseMatrix<iDynTree::RowMajor>::Iterator val = m_modelConstraintsJacobian[block].blockPtr->begin(); val != m_modelConstraintsJacobian[block].blockPtr->end(); ++val){
                 values[index] = val->value();
                 index++;
             }
         }
         for(int block=0; block < m_wrenchConstraintJacobian.size(); ++block){
-            for(iDynTree::SparseMatrix::Iterator val = m_wrenchConstraintJacobian[block].blockPtr->begin(); val != m_wrenchConstraintJacobian[block].blockPtr->end(); ++val){
+            for(iDynTree::SparseMatrix<iDynTree::RowMajor>::Iterator val = m_wrenchConstraintJacobian[block].blockPtr->begin(); val != m_wrenchConstraintJacobian[block].blockPtr->end(); ++val){
                 values[index] = val->value();
                 index++;
             }
@@ -897,7 +900,7 @@ bool MPCIpOptSolver::eval_h(Ipopt::Index n, const Ipopt::Number* x, bool new_x, 
 {
     if(values == NULL){
         int index = 0;
-        for(iDynTree::SparseMatrix::Iterator val = m_costHessian.begin(); val != m_costHessian.end(); ++val){
+        for(iDynTree::SparseMatrix<iDynTree::RowMajor>::Iterator val = m_costHessian.begin(); val != m_costHessian.end(); ++val){
             iRow[index] = val->row();
             jCol[index] = val->column();
             index++;
@@ -905,7 +908,7 @@ bool MPCIpOptSolver::eval_h(Ipopt::Index n, const Ipopt::Number* x, bool new_x, 
     }
     else{
         int index = 0;
-        for(iDynTree::SparseMatrix::Iterator val = m_costHessian.begin(); val != m_costHessian.end(); ++val){
+        for(iDynTree::SparseMatrix<iDynTree::RowMajor>::Iterator val = m_costHessian.begin(); val != m_costHessian.end(); ++val){
             values[index] = obj_factor*val->value();
             index++;
         }
@@ -945,16 +948,19 @@ void MPCIpOptSolver::finalize_solution(Ipopt::SolverReturn status, Ipopt::Index 
         switch(status){
             
             case Ipopt::LOCAL_INFEASIBILITY:
+                std::cerr << "Unfeasible problem." << std::endl;
                 m_exitCode = -1;
                 break;
                 
             case Ipopt::MAXITER_EXCEEDED:
             case Ipopt::CPUTIME_EXCEEDED:
             case Ipopt::STOP_AT_TINY_STEP: //PREMATURE STOP
+                std::cerr << "Premature stop. (MaxIter/MaxCPU/TinyStep)." << std::endl;
                 m_exitCode = -2;
                 break;
                 
             case Ipopt::INVALID_NUMBER_DETECTED: //WRONG DATA INSERTION
+                std::cerr << "Invalid number detected." << std::endl;
                 m_exitCode = -3;
                 break;
                 
@@ -962,6 +968,7 @@ void MPCIpOptSolver::finalize_solution(Ipopt::SolverReturn status, Ipopt::Index 
             case Ipopt::INTERNAL_ERROR:
             case Ipopt::ERROR_IN_STEP_COMPUTATION:
             case Ipopt::RESTORATION_FAILURE: //IPOPT INTERNAL PROBLEM
+                std::cerr <<"Internal Problem"<< std::endl;
                 m_exitCode = -4;
                 break;
                 
@@ -984,12 +991,12 @@ bool MPCIpOptSolver::get_warm_start_iterate(Ipopt::IteratesVector& warm_start_it
 
 void MPCIpOptSolver::printJacobian(const std::string header, const std::vector<MatrixBlock>& input, int rows, int cols)
 {
-    iDynTree::SparseMatrix printer;
+    iDynTree::SparseMatrix<iDynTree::RowMajor> printer;
     printer.resize(rows, cols);
     
     iDynTree::Triplets filler;
     for(int block = 0; block < input.size(); ++block){
-        for(iDynTree::SparseMatrix::Iterator val = input[block].blockPtr->begin(); val != input[block].blockPtr->end(); ++val){
+        for(iDynTree::SparseMatrix<iDynTree::RowMajor>::Iterator val = input[block].blockPtr->begin(); val != input[block].blockPtr->end(); ++val){
             filler.pushTriplet(iDynTree::Triplet(val->row()+input[block].rowOffset, val->column()+input[block].colOffset, val->value()));
         }
     }
@@ -999,7 +1006,7 @@ void MPCIpOptSolver::printJacobian(const std::string header, const std::vector<M
 
 void MPCIpOptSolver::printIpOptMatrix(const std::string header, Ipopt::Index nele_jac, const iDynTree::VectorDynSize& iRow, const iDynTree::VectorDynSize& jCol, Ipopt::Number* values, int rows, int cols)
 {
-    iDynTree::SparseMatrix printer;
+    iDynTree::SparseMatrix<iDynTree::RowMajor> printer;
     printer.resize(rows, cols);
     
     iDynTree::Triplets filler;

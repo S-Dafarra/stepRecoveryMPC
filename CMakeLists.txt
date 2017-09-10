@@ -12,7 +12,7 @@ project(StepRecoveryMPC CXX)
 find_package(YCM REQUIRED)
 include(YCMDefaultDirs)
 
-find_package(iDynTree REQUIRED)
+find_package(iDynTree 0.7.2 REQUIRED)
 find_package(IPOPT REQUIRED)
 find_package(YARP REQUIRED)
 

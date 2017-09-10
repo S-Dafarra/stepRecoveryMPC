@@ -17,6 +17,7 @@
 #include <Eigen/Core>
 #include <yarp/os/Network.h>
 #include <yarp/os/LogStream.h>
+#include <ctime>
 
 int main(int argc, char * argv[])
 {
@@ -92,6 +93,7 @@ bool StepRecoveryCoordinator::configure(yarp::os::ResourceFinder& rf)
 
 bool StepRecoveryCoordinator::updateModule()
 {
+    clock_t begin, end;
     yarp::sig::Vector *inputData = controllerPort.read(false); //TODO Better handling of reading
     
     if(inputData != NULL){
@@ -100,18 +102,21 @@ bool StepRecoveryCoordinator::updateModule()
             std::cerr << "Wrong dimension on the input data" << std::endl;
             return false;
         }
-        
-        bool solved = controllerMPC.solve(inputBuffer, fL, fR, lastGamma);
-        
+        begin = clock();
+        bool solved = controllerMPC.solve(inputBuffer, fL, fR, newGamma, lastGamma);
+        end = clock();
+
+        std::cerr << "Solved in: " << double(end - begin) / CLOCKS_PER_SEC*1000 << "msec." << std::endl;
+
         yarp::sig::Vector& outputBuffer = outputPort.prepare();
-        outputBuffer.resize(21);
+        outputBuffer.resize(31);
         
         if(!solved){
             std::cerr << "Failed to find a solution" << std::endl;
-            iDynTree::toEigen(outputBuffer) << iDynTree::toEigen(fL_prev), iDynTree::toEigen(fR_prev), iDynTree::toEigen(lastGamma);
+            iDynTree::toEigen(outputBuffer) << iDynTree::toEigen(fL_prev), iDynTree::toEigen(fR_prev), iDynTree::toEigen(newGamma), iDynTree::toEigen(lastGamma), -1;
         }
         else{
-            iDynTree::toEigen(outputBuffer) << iDynTree::toEigen(fL), iDynTree::toEigen(fR), iDynTree::toEigen(lastGamma);
+            iDynTree::toEigen(outputBuffer) << iDynTree::toEigen(fL_prev), iDynTree::toEigen(fR_prev), iDynTree::toEigen(newGamma), iDynTree::toEigen(lastGamma), +1;
             fL_prev = fL;
             fR_prev = fR;
         }

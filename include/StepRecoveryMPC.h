@@ -82,7 +82,7 @@ public:
     StepRecoveryMPC();
     ~StepRecoveryMPC();
     
-    bool solve(const iDynTree::VectorDynSize& controllerData, iDynTree::VectorDynSize& fL, iDynTree::VectorDynSize& fR, iDynTree::VectorDynSize& lastGamma);
+    bool solve(const iDynTree::VectorDynSize& controllerData, iDynTree::VectorDynSize& fL, iDynTree::VectorDynSize& fR, iDynTree::VectorDynSize &newGamma, iDynTree::VectorDynSize& lastGamma);
     
     bool configure(yarp::os::Searchable& mpcOptions);
     
